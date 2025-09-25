@@ -1,0 +1,17 @@
+# Python / venv
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Streamlit
+.streamlit/*.toml
+
+# Credenciais / chaves (NÃO COMITAR)
+*.json
+*.key
+*.pem
+
+# VSCode / IDE
+.vscode/
+.idea/
