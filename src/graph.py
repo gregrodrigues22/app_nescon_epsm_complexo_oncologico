@@ -141,41 +141,87 @@ def pareto_barh(
                                                     x=0.88, xanchor="left")))
     return fig
 
-
 def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
+    """
+    Barras ordenadas por frequência, com:
+    - rótulo = quantidade + percentual
+    - escala de cor em degradê (colorbar) baseada na quantidade
+    """
     if col not in df:
         return go.Figure()
+
     cont = df[col].fillna("—").value_counts().reset_index()
     cont.columns = [col, "Qtde"]
     cont = cont.sort_values("Qtde", ascending=False)
+
     if cont.empty:
         return go.Figure()
 
-    vals = cont["Qtde"]
+    # Quantidade e percentual
+    vals = cont["Qtde"].astype(float)
+    total = float(vals.sum())
+    cont["Pct"] = vals / total * 100
+
     ymax = float(vals.max()) * 1.25
 
-    fig = go.Figure(data=[
-        go.Bar(
-            x=cont[col], y=vals,
-            text=vals, textposition="outside", cliponaxis=False,
-            marker=dict(color=vals, colorscale="Blues", showscale=False),
-            hovertemplate=f"<b>%{{x}}</b><br>Quantidade: %{{y}}<extra></extra>",
-        )
-    ])
-    fig.update_layout(
-        title=title, xaxis_title="", yaxis_title="Quantidade",
-        height=380, margin=dict(l=20, r=20, t=60, b=60),
-        paper_bgcolor="white", plot_bgcolor="white",
+    # Texto exibido nas barras (ex.: 22 (34,4%))
+    text_labels = [
+        f"{int(v):,}".replace(",", ".") + f" ({p:.1f}%)"
+        for v, p in zip(vals, cont["Pct"])
+    ]
+
+    # Customdata para hover (qtd + %)
+    customdata = np.stack([vals, cont["Pct"]], axis=-1)
+
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=cont[col],
+                y=vals,
+                text=text_labels,
+                textposition="outside",
+                cliponaxis=False,
+                marker=dict(
+                    color=vals,
+                    colorscale="Blues",
+                    showscale=True,              # ✅ mostra a barrinha de degradê
+                    colorbar=dict(
+                        title="Quantidade",
+                        x=1.02,                   # ligeiramente à direita do gráfico
+                    ),
+                ),
+                customdata=customdata,
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "Quantidade: %{customdata[0]:,.0f}<br>"
+                    "Percentual: %{customdata[1]:.1f}%"
+                    "<extra></extra>"
+                ),
+            )
+        ]
     )
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="",
+        yaxis_title="Quantidade",
+        height=380,
+        margin=dict(l=20, r=60, t=60, b=60),  # r maior para acomodar a colorbar
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+    )
+
     fig.update_xaxes(
         tickmode="array",
         tickvals=cont[col],
         ticktext=[_wrap_label(x, max_chars) for x in cont[col]],
-        tickangle=0, automargin=True,
+        tickangle=0,
+        automargin=True,
     )
-    fig.update_yaxes(range=[0, ymax])
-    return fig
 
+    fig.update_yaxes(range=[0, ymax])
+
+    return fig
 
 def map_points(df: pd.DataFrame, lon_col: str, lat_col: str, text_col: str | None = None):
     df = df.copy()
