@@ -494,6 +494,25 @@ def fmt_num(n: float | int, decimals: int = 0) -> str:
     # troca vírgula por ponto e ponto por vírgula
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return s
+
+def _opts_serv(df: pd.DataFrame, col: str):
+    """Opções ordenadas para filtros (aba Serviços)."""
+    if col not in df:
+        return []
+    return (
+        df[col]
+        .dropna()
+        .astype(str)
+        .sort_values()
+        .unique()
+        .tolist()
+    )
+
+def _apply_multifilter(df: pd.DataFrame, col: str, sel):
+    """Aplica filtro de multiselect se houver seleção."""
+    if (not sel) or (col not in df):
+        return df
+    return df[df[col].astype(str).isin([str(x) for x in sel])]
     
 # ==============================================================
 # Sidebar
@@ -897,7 +916,7 @@ with abas[1]:
 
     # Gráficos = Tabela 1 CNES Serviços Especializados (última competência)
 
-    st.info("📊 Gráficos — Tabela 1 = CNES Serviços Especializados (Última competência)")
+    st.info("📊 Gráficos: Visuais para responder às perguntas segundo os filtros aplicados")
 
     # 1) Número de estabelecimentos por Tipo de Estabelecimento
     with st.expander(
@@ -981,7 +1000,7 @@ with abas[1]:
     # ==============================================================
 
     st.info(
-        "📋 Tabela 1 — Tabela descritiva do cadastro de cada estabelecimento "
+        "📋 Tabela: Veja os dados granulares que montaram os indicadores expostos "
         "(CNES Serviços Especializados, última competência)"
     )
 
@@ -1009,21 +1028,262 @@ with abas[1]:
         st.write("Não há colunas de cadastro disponíveis para exibir a tabela.")
 
 # ====================== 3) Cadastro Serviços ======================
+# ====================== 3) Cadastro Serviços ======================
 with abas[2]:
-    st.subheader("🗂️ Cadastro Serviços")
+    st.subheader("🗂️ Cadastro de Serviços Especializados")
 
-    df_srv = load_table(TABLES["servicos"])
+    df_srv = load_table(TABLES["servicos"]).copy()
 
-    st.info("🔎 Filtros — Serviços especializados")
-    dfs = render_with_spinner_once("servicos", df_srv, FILTER_SPEC["servicos"], prefix="srv")
+    st.info("🔎 Filtros: Use os controles abaixo para refinar os resultados.")
 
-    for cand in ["servicos_especializados_servico_classificacao", "servicos_especializados_servico"]:
-        if cand in dfs and dfs[cand].notna().any():
-            st.plotly_chart(
-                bar_count(dfs, cand, f"Distribuição por {cand}"),
-                use_container_width=True,
-            )
-            break
+    # helper local só para não depender de _opts global
+    def _opts_srv(col: str):
+        if col not in df_srv:
+            return []
+        return sorted(df_srv[col].dropna().unique())
+
+    # ----------------- Filtros gerais (território + perfil do estab.) -----------------
+
+    # Linha 1 – principais
+    c1, c2, c3 = st.columns(3)
+    comp_sel = c1.multiselect(
+        "Competência",
+        options=_opts_srv("servicos_especializados_competencia"),
+        key="srv_comp",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    uf_sel = c2.multiselect(
+        "Estabelecimento - UF",
+        options=_opts_srv("ibge_no_uf"),
+        key="srv_uf",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    reg_sel = c3.multiselect(
+        "Estabelecimento - Região (Mesorregião)",
+        options=_opts_srv("ibge_no_mesorregiao"),
+        key="srv_reg",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # Linha 2 – território
+    c4, c5, c6 = st.columns(3)
+    mun_sel = c4.multiselect(
+        "Estabelecimento - Município",
+        options=_opts_srv("servicos_especializados_municipio"),
+        key="srv_mun",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    reg_saude_sel = c5.multiselect(
+        "Estabelecimento - Região de Saúde",
+        options=_opts_srv("ibge_no_regiao_saude"),
+        key="srv_regsaude",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    micro_sel = c6.multiselect(
+        "Estabelecimento - Microrregião Geográfica",
+        options=_opts_srv("ibge_no_microrregiao"),
+        key="srv_micro",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # Linha 3 – perfil do estabelecimento
+    c7, c8, c9 = st.columns(3)
+    tipo_sel = c7.multiselect(
+        "Estabelecimento - Tipo",
+        options=_opts_srv("servicos_especializados_tipo_do_estabelecimento"),
+        key="srv_tipo",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    subtipo_sel = c8.multiselect(
+        "Estabelecimento - Subtipo",
+        options=_opts_srv("servicos_especializados_subtipo_do_estabelecimento"),
+        key="srv_subtipo",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    gestao_sel = c9.multiselect(
+        "Estabelecimento - Gestão",
+        options=_opts_srv("servicos_especializados_gestao"),
+        key="srv_gestao",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # Linha 4 – convênio / natureza / status
+    c10, c11, c12 = st.columns(3)
+    convenio_sel = c10.multiselect(
+        "Estabelecimento - Convênio SUS",
+        options=_opts_srv("servicos_especializados_convenio_sus"),
+        key="srv_convenio",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    natureza_sel = c11.multiselect(
+        "Estabelecimento - Natureza jurídica",
+        options=_opts_srv("servicos_especializados_categoria_natureza_juridica"),
+        key="srv_natjur",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    status_sel = c12.multiselect(
+        "Estabelecimento - Status",
+        options=_opts_srv("servicos_especializados_status_do_estabelecimento"),
+        key="srv_status",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # Linha 5 – IVS
+    ivs_sel = st.multiselect(
+        "Estabelecimento - Município IVS (Índice de Vulnerabilidade Social)",
+        options=_opts_srv("ibge_ivs"),
+        key="srv_ivs",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # ----------------- Filtros de habilitações oncológicas (booleans) -----------------
+    def bool_multiselect(label: str, key: str, placeholder: str | None = None):
+        return st.multiselect(
+            label,
+            options=["Sim", "Não"],
+            key=key,
+            placeholder=placeholder,
+        )
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+
+    with col1:
+        onco_cacon_sel = bool_multiselect(
+            "CACON", "srv_onco_cacon",
+            placeholder="Selecione a(s) opção(ões) desejadas",
+        )
+    with col2:
+        onco_unacon_sel = bool_multiselect(
+            "UNACON", "srv_onco_unacon",
+            placeholder="Selecione a(s) opção(ões) desejadas",
+        )
+    with col3:
+        onco_radio_sel = bool_multiselect(
+            "Radioterapia", "srv_onco_radio",
+            placeholder="Selecione a(s) opção(ões) desejadas",
+        )
+    with col4:
+        onco_quimio_sel = bool_multiselect(
+            "Quimioterapia", "srv_onco_quimio",
+            placeholder="Selecione a(s) opção(ões) desejadas",
+        )
+    with col5:
+        hab_onco_cir_sel = bool_multiselect(
+            "Onco Cirúrgica", "srv_hab_onco_cir",
+            placeholder="Selecione a(s) opção(ões) desejadas",
+        )
+
+    # ----------------- Filtros específicos de serviços especializados -----------------
+    st.markdown(
+        """
+        <hr style='margin-top:1.2rem; margin-bottom:1.2rem; opacity:0.35;'>
+        <div style='font-size:0.95rem; font-weight:600; margin-bottom:0.6rem;'>
+            Filtros específicos de serviços especializados
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    cA, cB = st.columns(2)
+    servico_sel = cA.multiselect(
+        "Serviço especializado",
+        options=_opts_srv("servicos_especializados_servico"),
+        key="srv_servico",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    servico_class_sel = cB.multiselect(
+        "Classificação do serviço especializado",
+        options=_opts_srv("servicos_especializados_servico_classificacao"),
+        key="srv_servico_class",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    d1, d2, d3, d4, d5 = st.columns(5)
+    amb_sus_sel = d1.multiselect(
+        "Ambulatorial SUS",
+        options=_opts_srv("servicos_especializados_servico_ambulatorial_sus"),
+        key="srv_amb_sus",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    amb_nao_sus_sel = d2.multiselect(
+        "Ambulatorial não SUS",
+        options=_opts_srv("servicos_especializados_servico_ambulatorial_nao_sus"),
+        key="srv_amb_nao_sus",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    hosp_sus_sel = d3.multiselect(
+        "Hospitalar SUS",
+        options=_opts_srv("servicos_especializados_servico_hospitalar_sus"),
+        key="srv_hosp_sus",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    hosp_nao_sus_sel = d4.multiselect(
+        "Hospitalar não SUS",
+        options=_opts_srv("servicos_especializados_servico_hospitalar_nao_sus"),
+        key="srv_hosp_nao_sus",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+    terceiro_sel = d5.multiselect(
+        "Terceiro",
+        options=_opts_srv("servicos_especializados_servico_terceiro"),
+        key="srv_terceiro",
+        placeholder="Selecione a(s) opção(ões) desejadas",
+    )
+
+    # ----------------- Aplicar filtros -----------------
+    dfs = df_srv.copy()
+
+    def apply_multisel(df, col, sel):
+        if sel and col in df:
+            return df[df[col].isin(sel)]
+        return df
+
+    # filtros gerais
+    dfs = apply_multisel(dfs, "servicos_especializados_competencia", comp_sel)
+    dfs = apply_multisel(dfs, "ibge_no_uf", uf_sel)
+    dfs = apply_multisel(dfs, "ibge_no_mesorregiao", reg_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_municipio", mun_sel)
+    dfs = apply_multisel(dfs, "ibge_no_regiao_saude", reg_saude_sel)
+    dfs = apply_multisel(dfs, "ibge_no_microrregiao", micro_sel)
+
+    dfs = apply_multisel(dfs, "servicos_especializados_tipo_do_estabelecimento", tipo_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_subtipo_do_estabelecimento", subtipo_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_gestao", gestao_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_convenio_sus", convenio_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_categoria_natureza_juridica", natureza_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_status_do_estabelecimento", status_sel)
+    dfs = apply_multisel(dfs, "ibge_ivs", ivs_sel)
+
+    # filtros booleanos
+    def apply_bool_multisel(df, col, sel):
+        if not sel or col not in df:
+            return df
+        s = df[col].astype("boolean")
+        allowed = []
+        if "Sim" in sel:
+            allowed.append(True)
+        if "Não" in sel:
+            allowed.append(False)
+        return df[s.isin(allowed)]
+
+    dfs = apply_bool_multisel(dfs, "onco_cacon", onco_cacon_sel)
+    dfs = apply_bool_multisel(dfs, "onco_unacon", onco_unacon_sel)
+    dfs = apply_bool_multisel(dfs, "onco_radioterapia", onco_radio_sel)
+    dfs = apply_bool_multisel(dfs, "onco_quimioterapia", onco_quimio_sel)
+    dfs = apply_bool_multisel(dfs, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
+
+    # filtros específicos de serviços
+    dfs = apply_multisel(dfs, "servicos_especializados_servico", servico_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_classificacao", servico_class_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_ambulatorial_sus", amb_sus_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_ambulatorial_nao_sus", amb_nao_sus_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_hospitalar_sus", hosp_sus_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_hospitalar_nao_sus", hosp_nao_sus_sel)
+    dfs = apply_multisel(dfs, "servicos_especializados_servico_terceiro", terceiro_sel)
+
+    # A partir daqui use `dfs` nos seus KPIs / gráficos / tabelas da aba de Serviços
+    st.info("📊 Distribuição de serviços especializados (após filtros)")
+    st.write(f"Total de linhas após filtros: {len(dfs):,}".replace(",", "."))
 
 # ====================== 4) Habilitação ======================
 with abas[3]:
