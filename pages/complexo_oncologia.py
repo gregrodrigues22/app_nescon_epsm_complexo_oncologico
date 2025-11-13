@@ -8,6 +8,7 @@ from pathlib import Path
 
 # Gráficos reutilizáveis
 from src.graph import pareto_barh, bar_count
+from src.graph import pie_standard
 
 # ==============================================================
 # Config
@@ -481,6 +482,19 @@ def safe_page_link(path: str, label: str, icon: str | None = None):
     except Exception:
         st.button(label, icon=icon, disabled=True, help="Navegação multipage indisponível aqui.")
 
+def fmt_num(n: float | int, decimals: int = 0) -> str:
+    """Formata número em pt-BR: milhar com '.', decimal com ','."""
+    if n is None:
+        return "-"
+    if decimals == 0:
+        # inteiro com separador de milhar
+        return f"{int(round(n)):,}".replace(",", ".")
+    # exemplo: 1191.6 -> '1,191.6'
+    s = f"{n:,.{decimals}f}"
+    # troca vírgula por ponto e ponto por vírgula
+    s = s.replace(",", "X").replace(".", ",").replace("X", ".")
+    return s
+    
 # ==============================================================
 # Sidebar
 # ==============================================================
@@ -569,11 +583,11 @@ with abas[0]:
         df_matriz.get("tipo_indicador", pd.Series(dtype=str)).dropna().unique().tolist()
     )
 
-    tela_sel = c1.multiselect("Tela", options=telas, key="mat_telas")
-    secao_sel = c2.multiselect("Seção da tela", options=secoes, key="mat_secoes")
-    tipo_sel = c3.multiselect("Tipo de indicador", options=tipos, key="mat_tipos")
+    tela_sel = c1.multiselect("Tela", options=telas, key="mat_telas", placeholder="Selecione a(s) opção(ões) desejadas")
+    secao_sel = c2.multiselect("Seção da tela", options=secoes, key="mat_secoes", placeholder="Selecione a(s) opção(ões) desejadas")
+    tipo_sel = c3.multiselect("Tipo de indicador", options=tipos, key="mat_tipos", placeholder="Selecione a(s) opção(ões) desejadas")
 
-    fonte_sel = st.multiselect("Fonte de dados", options=fontes, key="mat_fontes")
+    fonte_sel = st.multiselect("Fonte de dados", options=fontes, key="mat_fontes",placeholder="Selecione a(s) opção(ões) desejadas")
 
     dfm = df_matriz.copy()
 
@@ -727,40 +741,75 @@ with abas[1]:
     # ----------------- Filtros -----------------
     # Linha 1 – filtros principais
     c1, c2, c3 = st.columns(3)
-    comp_sel = c1.multiselect("Competência", options=_opts(df_est, "competencia"), key="est_comp")
-    uf_sel   = c2.multiselect("Estabelecimento - UF", options=_opts(df_est, "no_uf"), key="est_uf")
-    reg_sel  = c3.multiselect("Estabelecimento - Região", options=_opts(df_est, "no_regiao"), key="est_reg")
+    comp_sel = c1.multiselect("Competência", options=_opts(df_est, "competencia"), key="est_comp", placeholder="Selecione a(s) opção(ões) desejadas")
+    uf_sel   = c2.multiselect("Estabelecimento - UF", options=_opts(df_est, "no_uf"), key="est_uf",placeholder="Selecione a(s) opção(ões) desejadas")
+    reg_sel  = c3.multiselect("Estabelecimento - Região", options=_opts(df_est, "no_regiao"), key="est_reg",placeholder="Selecione a(s) opção(ões) desejadas")
 
     # Linha 2 – território
     c4, c5, c6 = st.columns(3)
-    mun_sel        = c4.multiselect("Estabelecimento - Município", options=_opts(df_est, "municipio"), key="est_mun")
-    reg_saude_sel  = c5.multiselect("Estabelecimento - Região de Saúde", options=_opts(df_est, "cod_regiao_saude"), key="est_regsaude")
-    micro_sel      = c6.multiselect("Estabelecimento - Microrregião Geográfica", options=_opts(df_est, "no_microrregiao"), key="est_micro")
+    mun_sel        = c4.multiselect("Estabelecimento - Município", options=_opts(df_est, "municipio"), key="est_mun",placeholder="Selecione a(s) opção(ões) desejadas")
+    reg_saude_sel  = c5.multiselect("Estabelecimento - Região de Saúde", options=_opts(df_est, "cod_regiao_saude"), key="est_regsaude",placeholder="Selecione a(s) opção(ões) desejadas")
+    micro_sel      = c6.multiselect("Estabelecimento - Microrregião Geográfica", options=_opts(df_est, "no_microrregiao"), key="est_micro",placeholder="Selecione a(s) opção(ões) desejadas")
 
     # Linha 3 – perfil do estabelecimento
     c7, c8, c9 = st.columns(3)
-    tipo_sel    = c7.multiselect("Estabelecimento - Tipo",    options=_opts(df_est, "tipo_do_estabelecimento"), key="est_tipo")
-    subtipo_sel = c8.multiselect("Estabelecimento - Subtipo", options=_opts(df_est, "subtipo_do_estabelecimento"), key="est_subtipo")
-    gestao_sel  = c9.multiselect("Estabelecimento - Gestão", options=_opts(df_est, "gestao"), key="est_gestao")
+    tipo_sel    = c7.multiselect("Estabelecimento - Tipo",    options=_opts(df_est, "tipo_do_estabelecimento"), key="est_tipo",placeholder="Selecione a(s) opção(ões) desejadas")
+    subtipo_sel = c8.multiselect("Estabelecimento - Subtipo", options=_opts(df_est, "subtipo_do_estabelecimento"), key="est_subtipo",placeholder="Selecione a(s) opção(ões) desejadas")
+    gestao_sel  = c9.multiselect("Estabelecimento - Gestão", options=_opts(df_est, "gestao"), key="est_gestao",placeholder="Selecione a(s) opção(ões) desejadas")
 
     c10, c11, c12 = st.columns(3)
-    convenio_sel = c10.multiselect("Estabelecimento - Convênio SUS", options=_opts(df_est, "convenio_sus"), key="est_convenio")
-    natureza_sel = c11.multiselect("Estabelecimento - Natureza jurídica", options=_opts(df_est, "categoria_natureza_juridica"), key="est_natjur")
-    status_sel   = c12.multiselect("Estabelecimento - Status", options=_opts(df_est, "status_do_estabelecimento"), key="est_status")
+    convenio_sel = c10.multiselect("Estabelecimento - Convênio SUS", options=_opts(df_est, "convenio_sus"), key="est_convenio",placeholder="Selecione a(s) opção(ões) desejadas")
+    natureza_sel = c11.multiselect("Estabelecimento - Natureza jurídica", options=_opts(df_est, "categoria_natureza_juridica"), key="est_natjur",placeholder="Selecione a(s) opção(ões) desejadas")
+    status_sel   = c12.multiselect("Estabelecimento - Status", options=_opts(df_est, "status_do_estabelecimento"), key="est_status",placeholder="Selecione a(s) opção(ões) desejadas")
+
 
     # Linha 4 – IVS
-    ivs_sel = st.multiselect("Estabelecimento - Município IVS (Índice de Vulnerabilidade Social)", options=_opts(df_est, "ivs"), key="est_ivs")
+    ivs_sel = st.multiselect("Estabelecimento - Município IVS (Índice de Vulnerabilidade Social)", options=_opts(df_est, "ivs"), key="est_ivs",placeholder="Selecione a(s) opção(ões) desejadas")
+    
+    def bool_multiselect(label: str, key: str, placeholder: str | None = None):
+        return st.multiselect(
+            label,
+            options=["Sim", "Não"],
+            key=key,
+            placeholder=placeholder,
+        )
 
-    cb1, cb2, cb3, cb4, cb5 = st.columns(5)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
-    def bool_multiselect(label: str, key: str):
-        return st.multiselect(label, options=["Sim", "Não"], key=key)
+    with col1:
+        onco_cacon_sel = bool_multiselect(
+            "CACON",
+            "est_onco_cacon",
+            placeholder="Selecione a(s) opção(ões) desejadas"
+        )
 
-    onco_cacon_sel   = bool_multiselect("CACON",             "est_onco_cacon")
-    onco_unacon_sel  = bool_multiselect("UNACON",            "est_onco_unacon")
-    onco_radio_sel   = bool_multiselect("Radioterapia",      "est_onco_radio")
-    onco_quimio_sel  = bool_multiselect("Quimioterapia",     "est_onco_quimio")
-    hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",    "est_hab_onco_cir")
+    with col2:
+        onco_unacon_sel = bool_multiselect(
+            "UNACON",
+            "est_onco_unacon",
+            placeholder="Selecione a(s) opção(ões) desejadas"
+        )
+
+    with col3:
+        onco_radio_sel = bool_multiselect(
+            "Radioterapia",
+            "est_onco_radio",
+            placeholder="Selecione a(s) opção(ões) desejadas"
+        )
+
+    with col4:
+        onco_quimio_sel = bool_multiselect(
+            "Quimioterapia",
+            "est_onco_quimio",
+            placeholder="Selecione a(s) opção(ões) desejadas"
+        )
+
+    with col5:
+        hab_onco_cir_sel = bool_multiselect(
+            "Onco Cirúrgica",
+            "est_hab_onco_cir",
+            placeholder="Selecione a(s) opção(ões) desejadas"
+        )
 
     # ----------------- Aplicar filtros -----------------
     dfe = df_est.copy()
@@ -834,61 +883,130 @@ with abas[1]:
     n_onco_cir = count_hab("habilitacao_agrupado_onco_cirurgica")
 
     # Layout dos KPIs
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Número de estabelecimentos", f"{tot_est:,}".replace(",", "."))
-    c2.metric("Média de estabelecimentos por Região de Saúde", f"{media_por_regiao:,.1f}".replace(",", "."))
-    c3.metric("Média de estabelecimentos por UF", f"{media_por_uf:,.1f}".replace(",", "."))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Número de estabelecimentos", fmt_num(tot_est, 0))
+    c2.metric("Média de estabelecimentos por Região de Saúde",fmt_num(media_por_regiao, 1),)
+    c3.metric("Média de estabelecimentos por UF",fmt_num(media_por_uf, 1),)
+    c4.metric("Estab. habilitados CACON", fmt_num(n_cacon, 0))
 
-    c4, c5, c6, c7, c8 = st.columns(5)
-    c4.metric("Estabelecimentos habilitados CACON",        f"{n_cacon:,}".replace(",", "."))
-    c5.metric("Estabelecimentos habilitados UNACON",       f"{n_unacon:,}".replace(",", "."))
-    c6.metric("Estabelecimentos habilitados Radioterapia", f"{n_radio:,}".replace(",", "."))
-    c7.metric("Estabelecimentos habilitados Quimioterapia", f"{n_quimio:,}".replace(",", "."))
-    c8.metric("Estabelecimentos habilitados Onco Cirúrgica", f"{n_onco_cir:,}".replace(",", "."))
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Estab. habilitados UNACON", fmt_num(n_unacon, 0))
+    c6.metric("Estab. habilitados Radioterapia", fmt_num(n_radio, 0))
+    c7.metric("Estab. habilitados Quimioterapia", fmt_num(n_quimio, 0))
+    c8.metric("Estab. habilitados Onco Cirúrgica", fmt_num(n_onco_cir, 0))
 
-    # ----------------- Gráficos -----------------
-    st.info("📊 Gráficos: Visuais para responder às perguntas segundo os filtros aplicados")
+    # Gráficos = Tabela 1 CNES Serviços Especializados (última competência)
 
-    # 1) Tipos de estabelecimento
-    with st.expander("Quais tipos de estabelecimentos compõem o complexo oncológico?", expanded=True):
+    st.info("📊 Gráficos — Tabela 1 = CNES Serviços Especializados (Última competência)")
+
+    # 1) Número de estabelecimentos por Tipo de Estabelecimento
+    with st.expander(
+        "Número de estabelecimentos por Tipo de Estabelecimento", expanded=True
+    ):
         if "tipo_do_estabelecimento" in dfe and dfe["tipo_do_estabelecimento"].notna().any():
-            st.plotly_chart(
-                pareto_barh(
-                    dfe,
-                    "tipo_do_estabelecimento",
-                    None,
-                    "Tipos de Estabelecimento — Pareto",
-                    "Qtde",
-                ),
-                use_container_width=True,
+            fig_tipo = pareto_barh(
+                dfe,
+                "tipo_do_estabelecimento",
+                None,
+                "Número de estabelecimentos por Tipo de Estabelecimento",
+                "Qtde",
             )
+            st.plotly_chart(fig_tipo, use_container_width=True)
         else:
             st.write("Nenhum dado disponível para este gráfico.")
 
-    # 2) Natureza jurídica
-    with st.expander("Qual é a distribuição por natureza jurídica?", expanded=False):
-        if "categoria_natureza_juridica" in dfe and dfe["categoria_natureza_juridica"].notna().any():
-            st.plotly_chart(
-                bar_count(
-                    dfe,
-                    "categoria_natureza_juridica",
-                    "Distribuição por categoria de natureza jurídica",
-                    28,
-                ),
-                use_container_width=True,
-            )
-        else:
-            st.write("Nenhum dado disponível para este gráfico.")
-
-    # 3) Gestão
-    with st.expander("Como os estabelecimentos se distribuem por tipo de gestão?", expanded=False):
+    # 2) Número de estabelecimentos por Tipo de Gestão
+    with st.expander(
+        "Número de estabelecimentos por Tipo de Gestão", expanded=True
+    ):
         if "gestao" in dfe and dfe["gestao"].notna().any():
-            st.plotly_chart(
-                bar_count(dfe, "gestao", "Distribuição por gestão", 24),
-                use_container_width=True,
+            fig_gestao = bar_count(
+                dfe,
+                "gestao",
+                "Número de estabelecimentos por Tipo de Gestão",
+                24,
             )
+            st.plotly_chart(fig_gestao, use_container_width=True)
         else:
             st.write("Nenhum dado disponível para este gráfico.")
+
+    # 3) Número de estabelecimentos por Convênio SUS
+    with st.expander(
+        "Número de estabelecimentos por Convênio SUS", expanded=True
+    ):
+        if "convenio_sus" in dfe and dfe["convenio_sus"].notna().any():
+            # exemplo de agregação – ajuste os nomes conforme sua base
+            df_conv = (
+                df_est
+                .groupby("convenio_sus", dropna=False)["cnes"]   # ou a coluna de id do estabelecimento
+                .nunique()
+                .reset_index(name="qtde_estab")
+            )
+
+            fig_convenio = pie_standard(
+                df_conv,
+                names="convenio_sus",
+                values="qtde_estab",
+                title="Número de estabelecimentos por Convênio SUS",
+                hole=0.35,                 # pizza com “buraco” (donut)
+                top_n=None,                # se quiser limitar e agrupar em “Outros”, defina um número
+                legend_pos="below_title",
+                percent_digits=1,
+                number_digits=0,
+                thousands_sep=".",
+            )
+
+            st.plotly_chart(fig_convenio, use_container_width=True)
+        else:
+            st.write("Nenhum dado disponível para este gráfico.")
+
+    # 4) Número de estabelecimentos por Categoria da Natureza Jurídica
+    with st.expander(
+        "Número de estabelecimentos por Categoria da Natureza Jurídica", expanded=True
+    ):
+        col_nat = "categoria_natureza_juridica"
+        if col_nat in dfe and dfe[col_nat].notna().any():
+            fig_nat = bar_count(
+                dfe,
+                col_nat,
+                "Número de estabelecimentos por Categoria da Natureza Jurídica",
+                28,
+            )
+            st.plotly_chart(fig_nat, use_container_width=True)
+        else:
+            st.write("Nenhum dado disponível para este gráfico.")
+
+    # ==============================================================
+    # Tabela descritiva do cadastro de cada estabelecimento
+    # ==============================================================
+
+    st.info(
+        "📋 Tabela 1 — Tabela descritiva do cadastro de cada estabelecimento "
+        "(CNES Serviços Especializados, última competência)"
+    )
+
+    # escolhe colunas mais importantes, se existirem
+    cols_base = [
+        "cnes",
+        "nome_fantasia",
+        "municipio",
+        "no_uf",
+        "tipo_do_estabelecimento",
+        "subtipo_do_estabelecimento",
+        "gestao",
+        "convenio_sus",
+        "categoria_natureza_juridica",
+    ]
+    cols_exist = [c for c in cols_base if c in dfe.columns]
+
+    if cols_exist:
+        st.dataframe(
+            dfe[cols_exist].sort_values(["no_uf", "municipio", "nome_fantasia"]),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.write("Não há colunas de cadastro disponíveis para exibir a tabela.")
 
 # ====================== 3) Cadastro Serviços ======================
 with abas[2]:

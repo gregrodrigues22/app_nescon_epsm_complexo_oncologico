@@ -40,108 +40,15 @@ def normalize_lonlat(series: pd.Series) -> pd.Series:
             return s / f
     return s / 1e9
 
-# =============== Gráficos reutilizáveis ===============
-
-def pareto_barh(
+# =============== Barras ===============
+def bar_count(
     df: pd.DataFrame,
-    cat_col: str,
-    value_col: str | None = None,
+    col: str,
     title: str = "",
-    colorbar_title: str = "",
-    highlight_value: str | None = None,
-):
-    if value_col is None:
-        df_agg = df.groupby(cat_col, dropna=False).size().reset_index(name="count")
-    else:
-        df_agg = df.groupby(cat_col, dropna=False)[value_col].sum().reset_index(name="count")
-
-    dfp = df_agg.sort_values("count", ascending=False).reset_index(drop=True)
-    if dfp.empty:
-        return go.Figure()
-
-    dfp[cat_col] = dfp[cat_col].astype(str)
-    total = dfp["count"].sum() or 1
-    dfp["pct"] = 100 * dfp["count"] / total
-    dfp["cum_pct"] = dfp["pct"].cumsum()
-    dfp["label_text"] = [f"{c:,} ({p:.1f}%)".replace(",", ".") for c, p in zip(dfp["count"], dfp["pct"])]
-    cats = dfp[cat_col]
-
-    fig = go.Figure(go.Bar(
-        y=cats,
-        x=dfp["count"],
-        orientation="h",
-        text=dfp["label_text"],
-        textposition="outside",
-        cliponaxis=False,
-        name="Quantidade",
-        marker=dict(
-            color=dfp["count"],
-            colorscale="Blues",
-            colorbar=dict(title=colorbar_title or "Quantidade", x=0.88, xanchor="left"),
-        ),
-        hovertemplate="<b>%{y}</b><br>Qtde: %{x}<extra></extra>",
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=dfp["cum_pct"],
-        y=cats,
-        mode="lines+markers+text",
-        line=dict(color="black", width=3, shape="spline"),
-        marker=dict(size=8, color="white", line=dict(color="black", width=2)),
-        text=[f"{v:.1f}%" for v in dfp["cum_pct"]],
-        textposition="middle right",
-        name="Acumulado (%)",
-        xaxis="x2",
-        hovertemplate="<b>%{y}</b><br>Acumulado: %{x:.1f}%<extra></extra>",
-    ))
-
-    xmax = float(dfp["count"].max()) * 1.45
-    left_margin = max(200, int(min(420, cats.map(len).max() * 8)))
-    x_domain = [0.0, 0.78]
-
-    fig.update_layout(
-        title=title,
-        paper_bgcolor="white",
-        plot_bgcolor="white",
-        margin=dict(l=left_margin, r=160, t=110, b=90),
-        height=max(440, 26 * len(dfp) + 170),
-        legend=dict(orientation="h", y=-0.28, yanchor="top", x=0.5, xanchor="center"),
-        xaxis=dict(domain=x_domain, range=[0, xmax], title="Quantidade",
-                   title_standoff=18, showgrid=True, gridcolor="rgba(0,0,0,0.08)"),
-        xaxis2=dict(overlaying="x", side="top", domain=x_domain, range=[0, 105],
-                    tickvals=[0, 20, 40, 60, 80, 100], ticksuffix="%", showgrid=False,
-                    title="Acumulado (%)", title_standoff=10),
-        yaxis=dict(autorange="reversed", title=""),
-    )
-
-    th_A, th_B = 80, 95
-    for (x0, x1, col) in [
-        (0, th_A, "rgba(46, 204, 113, 0.18)"),
-        (th_A, th_B, "rgba(243, 156, 18, 0.18)"),
-        (th_B, 100, "rgba(231, 76, 60, 0.16)"),
-    ]:
-        fig.add_shape(type="rect", xref="x2", yref="paper",
-                      x0=x0, x1=x1, y0=0, y1=1, fillcolor=col, line=dict(width=0), layer="below")
-    for x in (th_A, th_B):
-        fig.add_shape(type="line", xref="x2", yref="paper",
-                      x0=x, x1=x, y0=0, y1=1, line=dict(color="gray", width=2, dash="dash"))
-    fig.add_annotation(x=th_A/2, y=0.5, xref="x2", yref="paper",
-                       text="<b>A</b>", showarrow=False, font=dict(size=20, color="rgba(0,0,0,0.6)"))
-    fig.add_annotation(x=(th_A+th_B)/2, y=0.5, xref="x2", yref="paper",
-                       text="<b>B</b>", showarrow=False, font=dict(size=20, color="rgba(0,0,0,0.6)"))
-    fig.add_annotation(x=(th_B+100)/2, y=0.5, xref="x2", yref="paper",
-                       text="<b>C</b>", showarrow=False, font=dict(size=20, color="rgba(0,0,0,0.6)"))
-
-    if highlight_value is not None and highlight_value in set(dfp[cat_col]):
-        colors = [("crimson" if v == highlight_value else c)
-                  for v, c in zip(dfp[cat_col], dfp["count"])]
-        fig.update_traces(selector=dict(type="bar"),
-                          marker=dict(color=colors, colorscale="Blues",
-                                      colorbar=dict(title=colorbar_title or "Quantidade",
-                                                    x=0.88, xanchor="left")))
-    return fig
-
-def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
+    max_chars: int = 22,
+    max_width: int | None = 1100,
+    max_height: int | None = 400,
+) -> go.Figure:
     """
     Barras ordenadas por frequência, com:
     - rótulo = quantidade + percentual
@@ -157,20 +64,17 @@ def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
     if cont.empty:
         return go.Figure()
 
-    # Quantidade e percentual
     vals = cont["Qtde"].astype(float)
     total = float(vals.sum())
     cont["Pct"] = vals / total * 100
 
     ymax = float(vals.max()) * 1.25
 
-    # Texto exibido nas barras (ex.: 22 (34,4%))
     text_labels = [
         f"{int(v):,}".replace(",", ".") + f" ({p:.1f}%)"
         for v, p in zip(vals, cont["Pct"])
     ]
 
-    # Customdata para hover (qtd + %)
     customdata = np.stack([vals, cont["Pct"]], axis=-1)
 
     fig = go.Figure(
@@ -184,10 +88,10 @@ def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
                 marker=dict(
                     color=vals,
                     colorscale="Blues",
-                    showscale=True,              # ✅ mostra a barrinha de degradê
+                    showscale=True,
                     colorbar=dict(
                         title="Quantidade",
-                        x=1.02,                   # ligeiramente à direita do gráfico
+                        x=1.02,
                     ),
                 ),
                 customdata=customdata,
@@ -201,12 +105,20 @@ def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
         ]
     )
 
+    # define altura respeitando limite
+    auto_height = 380
+    if max_height is not None:
+        height = min(auto_height, max_height)
+    else:
+        height = auto_height
+
     fig.update_layout(
         title=title,
         xaxis_title="",
         yaxis_title="Quantidade",
-        height=380,
-        margin=dict(l=20, r=60, t=60, b=60),  # r maior para acomodar a colorbar
+        height=height,
+        width=max_width,
+        margin=dict(l=20, r=60, t=60, b=60),
         paper_bgcolor="white",
         plot_bgcolor="white",
     )
@@ -223,6 +135,7 @@ def bar_count(df: pd.DataFrame, col: str, title: str = "", max_chars: int = 22):
 
     return fig
 
+# =============== Mapa ===============
 def map_points(df: pd.DataFrame, lon_col: str, lat_col: str, text_col: str | None = None):
     df = df.copy()
     if lon_col not in df or lat_col not in df:
@@ -255,7 +168,7 @@ def map_points(df: pd.DataFrame, lon_col: str, lat_col: str, text_col: str | Non
     )
     return fig
 
-# =============== Gráficos reutilizáveis =============
+# =============== Pareto ===============
 # ------------------------------------------------------------------
 # 1) PARETO genérico
 # ------------------------------------------------------------------
@@ -266,7 +179,9 @@ def pareto_barh(
     title: str = "",
     colorbar_title: str = "",
     highlight_value: str | None = None,    # ex.: "Não identificado"
-):
+    max_width: int | None = 1200,          # 👉 limite de largura
+    max_height: int | None = 650,          # 👉 limite de altura
+) -> go.Figure:
     # 1) agrega e ordena
     if value_col is None:
         df_agg = df.groupby(cat_col, dropna=False).size().reset_index(name="count")
@@ -274,8 +189,11 @@ def pareto_barh(
         df_agg = df.groupby(cat_col, dropna=False)[value_col].sum().reset_index(name="count")
 
     dfp = df_agg.sort_values("count", ascending=False).reset_index(drop=True)
+    if dfp.empty:
+        return go.Figure()
+
     dfp[cat_col] = dfp[cat_col].astype(str)
-    total = dfp["count"].sum()
+    total = dfp["count"].sum() or 1
     dfp["pct"] = 100 * dfp["count"] / total
     dfp["cum_pct"] = dfp["pct"].cumsum()
     dfp["label_text"] = [f"{c:,} ({p:.1f}%)".replace(",", ".") for c, p in zip(dfp["count"], dfp["pct"])]
@@ -293,7 +211,7 @@ def pareto_barh(
         marker=dict(
             color=dfp["count"],
             colorscale="Blues",
-            colorbar=dict(title=colorbar_title or "Quantidade", x=0.90, xanchor="left")
+            colorbar=dict(title=colorbar_title or "Quantidade", x=0.88, xanchor="left"),
         ),
         hovertemplate="<b>%{y}</b><br>Qtde: %{x}<extra></extra>",
     ))
@@ -316,33 +234,40 @@ def pareto_barh(
     xmax = float(dfp["count"].max()) * 1.45
     left_margin = max(200, int(min(420, cats.map(len).max() * 8)))  # margem para rótulos longos
 
+    # altura dinâmica, mas limitada pelo max_height
+    auto_height = max(440, 26 * len(dfp) + 170)
+    if max_height is not None:
+        height = min(auto_height, max_height)
+    else:
+        height = auto_height
+
+    x_domain = [0.0, 0.78]
+
     fig.update_layout(
         title=title,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        margin=dict(l=left_margin, r=160, t=80, b=40),  # +top, +bottom
-        height=max(440, 26 * len(dfp) + 170),
+        margin=dict(l=left_margin, r=160, t=80, b=40),
+        height=height,
+        width=max_width,          # 👉 respeita largura máxima se não estiver usando use_container_width
         legend=dict(
             orientation="h",
-            y=1.02, yanchor="bottom",          # desce a legenda
+            y=1.02, yanchor="bottom",
             x=0.9, xanchor="center"
         ),
-    )
-    # domínio x + x2 (deixa um “gutter” à direita para a colorbar)
-    x_domain = [0.0, 0.78]
-
-    fig.update_layout(
         xaxis=dict(
             domain=x_domain,
             range=[0, xmax],
             title="Quantidade",
-            title_standoff=6,                # respiro do título X
-            showgrid=True, gridcolor="rgba(0,0,0,0.08)",
+            title_standoff=6,
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.08)",
         ),
         xaxis2=dict(
-            overlaying="x", side="top",
+            overlaying="x",
+            side="top",
             domain=x_domain,
-            range=[0, 105],                   # vai além de 100% para respiro
+            range=[0, 105],
             tickvals=[0, 20, 40, 60, 80, 100],
             ticksuffix="%",
             showgrid=False,
@@ -354,14 +279,24 @@ def pareto_barh(
 
     # 5) faixas A/B/C (80/95) + linhas guias
     th_A, th_B = 80, 95
-    for (x0, x1, col) in [(0, th_A, "rgba(46, 204, 113, 0.18)"),
-                          (th_A, th_B, "rgba(243, 156, 18, 0.18)"),
-                          (th_B, 100, "rgba(231, 76, 60, 0.16)")]:
-        fig.add_shape(type="rect", xref="x2", yref="paper",
-                      x0=x0, x1=x1, y0=0, y1=1, fillcolor=col, line=dict(width=0), layer="below")
+    for (x0, x1, col) in [
+        (0, th_A, "rgba(46, 204, 113, 0.18)"),
+        (th_A, th_B, "rgba(243, 156, 18, 0.18)"),
+        (th_B, 100, "rgba(231, 76, 60, 0.16)")
+    ]:
+        fig.add_shape(
+            type="rect", xref="x2", yref="paper",
+            x0=x0, x1=x1, y0=0, y1=1,
+            fillcolor=col, line=dict(width=0), layer="below"
+        )
+
     for x in (th_A, th_B):
-        fig.add_shape(type="line", xref="x2", yref="paper",
-                      x0=x, x1=x, y0=0, y1=1, line=dict(color="gray", width=2, dash="dash"))
+        fig.add_shape(
+            type="line", xref="x2", yref="paper",
+            x0=x, x1=x, y0=0, y1=1,
+            line=dict(color="gray", width=2, dash="dash")
+        )
+
     fig.add_annotation(x=th_A/2, y=0.5, xref="x2", yref="paper",
                        text="<b>A</b>", showarrow=False, font=dict(size=20, color="rgba(0,0,0,0.6)"))
     fig.add_annotation(x=(th_A+th_B)/2, y=0.5, xref="x2", yref="paper",
@@ -373,24 +308,18 @@ def pareto_barh(
     if highlight_value is not None and highlight_value in set(dfp[cat_col]):
         colors = [("crimson" if v == highlight_value else c)
                   for v, c in zip(dfp[cat_col], dfp["count"])]
-        fig.update_traces(selector=dict(type="bar"),
-                          marker=dict(color=colors, colorscale="Blues",
-                                      colorbar=dict(title=colorbar_title or "Quantidade",
-                                                    x=0.90, xanchor="left")))
-    # Evita cortes na curva/labels
-    fig.update_traces(
-        selector=dict(type="bar"),
-        marker=dict(
-            color=dfp["count"],
-            colorscale="Blues",
-            colorbar=dict(title=colorbar_title or "Quantidade", x=0.88, xanchor="left")  # antes ~0.90
+        fig.update_traces(
+            selector=dict(type="bar"),
+            marker=dict(
+                color=colors,
+                colorscale="Blues",
+                colorbar=dict(title=colorbar_title or "Quantidade", x=0.88, xanchor="left"),
+            ),
         )
-    )
+
     return fig
 
-# ------------------------------------------------------------------
-# 2) Barras por período + YoY + média + tendência + (opcional) MM
-# ------------------------------------------------------------------
+# =============== Barras por Período ===============
 def bar_yoy_trend(
     df: pd.DataFrame,
     *,
@@ -558,9 +487,7 @@ def bar_yoy_trend(
 
     return fig
 
-# ------------------------------------------------------------------
-# 3) Gráfico de Setor
-# ------------------------------------------------------------------
+# =============== Gráfico de Setor ===============
 def pie_standard(
     df: pd.DataFrame,
     names: str,                # coluna categórica
@@ -706,9 +633,7 @@ def pie_standard(
 
     return fig
 
-# ------------------------------------------------------------------
-# 4) Gráfico de Barras
-# ------------------------------------------------------------------
+# =============== Barras por Grupo ===============
 def bar_total_por_grupo(
     df: pd.DataFrame,
     *,
@@ -817,9 +742,7 @@ def bar_total_por_grupo(
 
     return fig
     
-# ------------------------------------------------------------------
-# 7) Heatmap
-# ------------------------------------------------------------------
+# =============== Heatmap ===============
 def _fmt_int(x: float) -> str:
     return f"{x:,.0f}".replace(",", ".")
 
@@ -917,9 +840,7 @@ def heatmap_absoluto(
     )
     return fig
 
-# ------------------------------------------------------------------
-# 8) Entradas e Saídas
-# ------------------------------------------------------------------
+# =============== Entradas e Saídas ===============
 def barras_bilaterais_entradas_saidas_ano(
     df: pd.DataFrame,
     *,
