@@ -561,7 +561,7 @@ st.markdown(
 )
 
 with st.sidebar:
-    st.image(str(LOGO), use_column_width=True)
+    st.image("assets/logo.png", use_column_width=True)
 
 with st.sidebar:
     st.page_link("app.py", label="Voltar ao Menu Principal", icon="🏠")
