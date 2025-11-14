@@ -43,7 +43,7 @@ TABLES = {
 }
 
 # ==============================================================
-# FILTER SPEC por tabela
+# FILTER SPEC por tabela (para abas genéricas)
 # ==============================================================
 FILTER_SPEC = {
     "equipamentos": {
@@ -294,34 +294,47 @@ FILTER_SPEC = {
         "habilitacao_agrupado_odontologia_ceo": "bool",
     },
     "servicos": {
-        "servicos_especializados_competencia": "str",
-        "servicos_especializados_uf": "str",
-        "servicos_especializados_codigo_do_municipio": "int",
-        "servicos_especializados_municipio": "str",
-        "servicos_especializados_cnes": "int",
-        "servicos_especializados_nome_fantasia": "str",
-        "servicos_especializados_tipo_novo_do_estabelecimento": "str",
-        "servicos_especializados_tipo_do_estabelecimento": "str",
-        "servicos_especializados_subtipo_do_estabelecimento": "str",
-        "servicos_especializados_gestao": "str",
-        "servicos_especializados_convenio_sus": "str",
-        "servicos_especializados_categoria_natureza_juridica": "str",
-        "servicos_especializados_status_do_estabelecimento": "str",
-        "servicos_especializados_servico": "str",
-        "servicos_especializados_servico_classificacao": "str",
-        "servicos_especializados_servico_ambulatorial_sus": "str",
-        "servicos_especializados_servico_ambulatorial_nao_sus": "str",
-        "servicos_especializados_servico_hospitalar_sus": "str",
-        "servicos_especializados_servico_hospitalar_nao_sus": "str",
-        "servicos_especializados_servico_terceiro": "str",
-        "ibge_no_municipio": "str",
-        "ibge_no_regiao_saude": "int",
-        "ibge_no_microrregiao": "str",
-        "ibge_no_mesorregiao": "str",
-        "ibge_no_uf": "str",
-        "ibge_ivs": "str",
-        "ibge_populacao_ibge_2021": "str",
+        "competencia": "str",
+        "uf": "str",
+        "codigo_do_municipio": "int",
+        "municipio": "str",
         "cnes": "int",
+        "nome_fantasia": "str",
+        "tipo_novo_do_estabelecimento": "str",
+        "tipo_do_estabelecimento": "str",
+        "subtipo_do_estabelecimento": "str",
+        "gestao": "str",
+        "convenio_sus": "str",
+        "categoria_natureza_juridica": "str",
+        "status_do_estabelecimento": "str",
+        "servico": "str",
+        "servico_classificacao": "str",
+        "servico_ambulatorial_sus": "str",
+        "servico_ambulatorial_nao_sus": "str",
+        "servico_hospitalar_sus": "str",
+        "servico_hospitalar_nao_sus": "str",
+        "servico_terceiro": "str",
+        "cod_ibge": "str",
+        "cod_ibge_7": "str",
+        "cod_regiao_saude": "str",
+        "no_regiao_saude": "int",
+        "no_municipio": "str",
+        "cod_uf": "int",
+        "sgl_uf": "str",
+        "no_uf": "str",
+        "cod_regiao": "int",
+        "sgl_regiao": "str",
+        "no_regiao": "str",
+        "cod_mesorregiao": "int",
+        "no_mesorregiao": "str",
+        "cod_microrregiao": "int",
+        "no_microrregiao": "str",
+        "no_rm_ride_au": "str",
+        "cod_rm_ride_au": "int",
+        "populacao_ibge_2013": "int",
+        "populacao_ibge_2017": "int",
+        "populacao_ibge_2021": "str",
+        "ivs": "str",
         "onco_cacon": "bool",
         "onco_unacon": "bool",
         "onco_radioterapia": "bool",
@@ -350,7 +363,7 @@ def load_table(table_fqn: str) -> pd.DataFrame:
     return client.query(f"SELECT * FROM `{table_fqn}`").to_dataframe()
 
 # ==============================================================
-# Filtro Genérico
+# Helpers de filtro genérico
 # ==============================================================
 def _opts(df: pd.DataFrame, col: str):
     s = df[col].dropna()
@@ -360,23 +373,11 @@ def ui_range_numeric(df: pd.DataFrame, col: str, key: str, label: str):
     s = pd.to_numeric(df[col], errors="coerce").dropna()
     if s.empty:
         return None
-
     vmin, vmax = int(s.min()), int(s.max())
-
-    # Caso especial: só existe um valor na coluna
     if vmin == vmax:
-        # Apenas informa o valor e não cria slider (evita erro)
         st.caption(f"{label}: {vmin} (apenas este valor disponível)")
-        # Se quiser ainda aplicar o filtro, retornamos a tupla fixa
         return (vmin, vmax)
-
-    lo, hi = st.slider(
-        label,
-        min_value=vmin,
-        max_value=vmax,
-        value=(vmin, vmax),
-        key=key,
-    )
+    lo, hi = st.slider(label, min_value=vmin, max_value=vmax, value=(vmin, vmax), key=key)
     return (lo, hi)
 
 def ui_multiselect(df: pd.DataFrame, col: str, key: str, label: str):
@@ -429,29 +430,30 @@ def render_filters(df: pd.DataFrame, spec: dict, prefix: str) -> pd.DataFrame:
 
     selections: dict[str, object] = {}
 
+    # Agrupados em expanders (funciona bem na sidebar)
     if years or months:
-        st.markdown("### ⏱️ Período")
-        cols = st.columns(max(1, len(years) + len(months)))
-        i = 0
-        for col in years:
-            with cols[i]:
-                selections[col] = ui_range_numeric(df, col, f"{prefix}_{col}", f"Ano — {col}")
-            i += 1
-        for col in months:
-            with cols[i]:
-                selections[col] = ui_range_numeric(df, col, f"{prefix}_{col}", f"Mês — {col}")
-            i += 1
+        with st.expander("⏱️ Período", expanded=True):
+            cols = st.columns(max(1, len(years) + len(months)))
+            i = 0
+            for col in years:
+                with cols[i]:
+                    selections[col] = ui_range_numeric(df, col, f"{prefix}_{col}", f"Ano — {col}")
+                i += 1
+            for col in months:
+                with cols[i]:
+                    selections[col] = ui_range_numeric(df, col, f"{prefix}_{col}", f"Mês — {col}")
+                i += 1
 
-    st.markdown("### 🧭 Dimensões")
-    _draw_multis(df, strs, selections, prefix, "Filtrar")
-    _draw_multis(df, ints, selections, prefix, "Filtrar")
+    with st.expander("🧭 Dimensões", expanded=False):
+        _draw_multis(df, strs, selections, prefix, "Filtrar")
+        _draw_multis(df, ints, selections, prefix, "Filtrar")
 
     if bools:
-        st.markdown("### ✅ Filtros booleanos")
-        cols = st.columns(min(4, len(bools)))
-        for i, col in enumerate(bools):
-            with cols[i % len(cols)]:
-                selections[col] = ui_bool(df, col, f"{prefix}_{col}", col)
+        with st.expander("✅ Filtros booleanos", expanded=False):
+            cols = st.columns(min(4, len(bools)))
+            for i, col in enumerate(bools):
+                with cols[i % len(cols)]:
+                    selections[col] = ui_bool(df, col, f"{prefix}_{col}", col)
 
     return apply_filters(df, selections)
 
@@ -464,15 +466,25 @@ def render_with_spinner_once(name: str, df: pd.DataFrame, spec: dict, prefix: st
         return out
     return render_filters(df, spec, prefix)
 
+# Detecta se um valor mudou desde a última execução
+def did_filters_change(key: str, value):
+    if key not in st.session_state:
+        st.session_state[key] = value
+        return True
+    if st.session_state[key] != value:
+        st.session_state[key] = value
+        return True
+    return False
+
+# Spinner "nulo" para quando não queremos mostrar nada
+class DummySpinner:
+    def __enter__(self): pass
+    def __exit__(self, *args): pass
+
 # Diretório raiz do app (onde está o app.py)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 def safe_page_link(path: str, label: str, icon: str | None = None):
-    """
-    Cria link para página se o arquivo existir.
-    Caso contrário, mostra botão desabilitado (em breve),
-    sem quebrar o app.
-    """
     full = ROOT_DIR / path
     try:
         if full.exists():
@@ -483,39 +495,64 @@ def safe_page_link(path: str, label: str, icon: str | None = None):
         st.button(label, icon=icon, disabled=True, help="Navegação multipage indisponível aqui.")
 
 def fmt_num(n: float | int, decimals: int = 0) -> str:
-    """Formata número em pt-BR: milhar com '.', decimal com ','."""
     if n is None:
         return "-"
     if decimals == 0:
-        # inteiro com separador de milhar
         return f"{int(round(n)):,}".replace(",", ".")
-    # exemplo: 1191.6 -> '1,191.6'
     s = f"{n:,.{decimals}f}"
-    # troca vírgula por ponto e ponto por vírgula
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     return s
 
-def _opts_serv(df: pd.DataFrame, col: str):
-    """Opções ordenadas para filtros (aba Serviços)."""
-    if col not in df:
-        return []
-    return (
-        df[col]
-        .dropna()
-        .astype(str)
-        .sort_values()
-        .unique()
-        .tolist()
+# =====================================================================
+# Tabs customizadas (estilo aba, sem cara de radio)
+# =====================================================================
+def custom_tabs(tabs_list, default=0, cor="rgb(0,161,178)"):
+    active_tab = st.radio("", tabs_list, index=default, horizontal=True)
+    selected = tabs_list.index(active_tab) + 1
+
+    st.markdown(
+        f"""
+        <style>
+        div[role=radiogroup] {{
+            border-bottom: 2px solid rgba(49, 51, 63, 0.1);
+            flex-direction: row;
+            gap: 0.8rem;              /* <<< estava 2rem */
+        }}
+        div[role=radiogroup] label {{
+            padding: 0 0.6rem 0.5rem;  /* um pouco mais compacto */
+            border-radius: 0;
+            position: relative;
+            top: 3px;
+            cursor: pointer;
+        }}
+        div[role=radiogroup] > label > div:first-of-type {{
+            display: none;
+        }}
+        div[role=radiogroup] label {{
+            padding-bottom: 0.5em;
+            border-radius: 0;
+            position: relative;
+            top: 3px;
+            cursor: pointer;
+        }}
+        div[role=radiogroup] label p {{
+            font-weight: 500;
+        }}
+        div[role=radiogroup] label:nth-child({selected}) {{
+            border-bottom: 3px solid {cor};
+        }}
+        div[role=radiogroup] label:nth-child({selected}) p {{
+            color: {cor};
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
-def _apply_multifilter(df: pd.DataFrame, col: str, sel):
-    """Aplica filtro de multiselect se houver seleção."""
-    if (not sel) or (col not in df):
-        return df
-    return df[df[col].astype(str).isin([str(x) for x in sel])]
-    
+    return active_tab
+
 # ==============================================================
-# Sidebar
+# Sidebar – navegação fixa (logo + menu)
 # ==============================================================
 st.markdown(
     "<style>[data-testid='stSidebarNav']{display:none;}</style>",
@@ -524,29 +561,9 @@ st.markdown(
 
 with st.sidebar:
     st.image("assets/logo.png", use_container_width=True)
-    st.markdown("<hr style='border:none;border-top:1px solid #ccc;'/>", unsafe_allow_html=True)
-    st.header("Menu")
 
-    # voltar ao menu principal
-    safe_page_link("app.py", label="Menu Principal", icon="🏠")
-
-    st.markdown("<hr style='border:none;border-top:1px solid #ccc;'/>", unsafe_allow_html=True)
-    st.subheader("Complexos Produtivos")
-
-    # este já existe (esta própria página)
-    safe_page_link("pages/complexo_oncologia.py", label="Oncologia", icon="🎗️")
-
-    # os demais ainda não existem -> aparecem como "em breve"
-    safe_page_link("pages/complexo_cardiovascular.py", label="Cardiovascular", icon="❤️")
-    safe_page_link("pages/complexo_ortopedia_trauma.py", label="Ortopedia e Traumatologia", icon="🦴")
-    safe_page_link("pages/complexo_obstetricia_neonatologia.py", label="Obstetrícia e Neonatologia", icon="🤰")
-    safe_page_link("pages/complexo_neuro.py", label="Neurologia e Neurocirurgia", icon="🧠")
-    safe_page_link("pages/complexo_nefrologia_trs.py", label="Nefrologia e TRS", icon="🧪")
-    safe_page_link("pages/complexo_queimados.py", label="Queimados", icon="🔥")
-    safe_page_link("pages/complexo_transplantes.py", label="Transplantes", icon="🫀")
-    safe_page_link("pages/complexo_saude_mental.py", label="Saúde Mental Especializada", icon="🧩")
-    safe_page_link("pages/complexo_reabilitacao.py", label="Reabilitação", icon="🦾")
-    safe_page_link("pages/complexo_urg_emerg.py", label="Urgência e Emergência", icon="🚑")
+with st.sidebar:
+    st.page_link("app.py", label="Voltar ao Menu Principal", icon="🏠")
 
 # ==============================================================
 # Cabeçalho
@@ -561,65 +578,96 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ==============================================================
-# Abas
-# ==============================================================
-abas = st.tabs(
-    [
-        "🧮 Matriz de Indicadores",
-        "🗂️ Cadastro Estabelecimentos",
-        "🗂️ Cadastro Serviços",
-        "✅ Habilitação",
-        "🛏️ Leitos",
-        "🧰 Equipamentos",
-        "🧑 Profissionais",
-        "📋 Registros Hospitalares",
-        "📐 Metodologia",
-    ]
-)
 
-# ====================== 1) Matriz de Indicadores ======================
-with abas[0]:
+# =====================================================================
+# Abas principais (agora usando custom_tabs)
+# =====================================================================
+#tabs_list = [
+#    "🧮 Matriz de Indicadores",
+#    "🗂️ Cadastro Estabelecimentos",
+#    "🗂️ Cadastro Serviços",
+#    "✅ Habilitação",
+#    "🛏️ Leitos",
+#    "🧰 Equipamentos",
+#    "🧑 Profissionais",
+#    "📋 Registros Hospitalares",
+#    "📐 Metodologia",
+#]
+
+tabs_labels = [
+    "🧮 Indicadores",
+    "🗂️ Estabelecimentos",
+    "🗂️ Cadastro Serviços",
+    "✅ Habilitação",
+    "🛏️ Leitos",
+    "🧰 Equipamentos",
+    "🧑 Profissionais",
+    "📋 Registros"
+]
+
+aba = custom_tabs(tabs_labels, cor="rgb(0,161,178)")
+#aba = custom_tabs(tabs_list, default=0, cor="rgb(0,161,178)")
+
+# =====================================================================
+# Aba Principal
+# =====================================================================
+
+if aba == "🏠 Menu Principal":
+    try:
+        import streamlit as st
+        st.switch_page("app.py")
+    except Exception:
+        st.info("Abra o arquivo `app.py` na barra lateral para voltar ao menu principal.")
+    st.stop()
+
+# =====================================================================
+# 1) Matriz de Indicadores
+# =====================================================================
+if aba == "🧮 Indicadores":
     st.subheader("🧮 Matriz de Indicadores")
 
     df_matriz = load_table(TABLES["matriz"])
 
-    # ----------------- Filtros principais -----------------
-    st.info("🔎 Filtros: Use os controles abaixo para refinar os resultados.")
+    # ----------------- Filtros na sidebar -----------------
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Matriz de Indicadores")
+        st.caption("Use os agrupadores abaixo para refinar os resultados.")
 
-    c1, c2, c3 = st.columns(3)
+        telas = sorted(df_matriz.get("tela", pd.Series(dtype=str)).dropna().unique().tolist())
+        secoes = sorted(df_matriz.get("secao_tela", pd.Series(dtype=str)).dropna().unique().tolist())
+        fontes = sorted(df_matriz.get("fonte_dados", pd.Series(dtype=str)).dropna().unique().tolist())
+        tipos = sorted(df_matriz.get("tipo_indicador", pd.Series(dtype=str)).dropna().unique().tolist())
 
-    telas = sorted(
-        df_matriz.get("tela", pd.Series(dtype=str)).dropna().unique().tolist()
-    )
-    secoes = sorted(
-        df_matriz.get("secao_tela", pd.Series(dtype=str)).dropna().unique().tolist()
-    )
-    fontes = sorted(
-        df_matriz.get("fonte_dados", pd.Series(dtype=str)).dropna().unique().tolist()
-    )
-    tipos = sorted(
-        df_matriz.get("tipo_indicador", pd.Series(dtype=str)).dropna().unique().tolist()
-    )
-
-    tela_sel = c1.multiselect("Tela", options=telas, key="mat_telas", placeholder="Selecione a(s) opção(ões) desejadas")
-    secao_sel = c2.multiselect("Seção da tela", options=secoes, key="mat_secoes", placeholder="Selecione a(s) opção(ões) desejadas")
-    tipo_sel = c3.multiselect("Tipo de indicador", options=tipos, key="mat_tipos", placeholder="Selecione a(s) opção(ões) desejadas")
-
-    fonte_sel = st.multiselect("Fonte de dados", options=fontes, key="mat_fontes",placeholder="Selecione a(s) opção(ões) desejadas")
+        with st.expander("Filtros principais", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            tela_sel = st.multiselect(
+                "Tela", options=telas, key="mat_telas",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            secao_sel = st.multiselect(
+                "Seção da tela", options=secoes, key="mat_secoes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_sel = st.multiselect(
+                "Tipo de indicador", options=tipos, key="mat_tipos",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            fonte_sel = st.multiselect(
+                "Fonte de dados", options=fontes, key="mat_fontes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
 
     dfm = df_matriz.copy()
-
-    if tela_sel:
+    if "tela" in dfm and tela_sel:
         dfm = dfm[dfm["tela"].isin(tela_sel)]
-    if secao_sel:
+    if "secao_tela" in dfm and secao_sel:
         dfm = dfm[dfm["secao_tela"].isin(secao_sel)]
-    if tipo_sel:
+    if "tipo_indicador" in dfm and tipo_sel:
         dfm = dfm[dfm["tipo_indicador"].isin(tipo_sel)]
-    if fonte_sel:
+    if "fonte_dados" in dfm and fonte_sel:
         dfm = dfm[dfm["fonte_dados"].isin(fonte_sel)]
 
-    # ----------------- Grandes números -----------------
     st.info("📏 Grandes números: Visão rápida com filtros aplicados")
     c1, c2, c3 = st.columns(3)
     c1.metric("Indicadores", f"{len(dfm):,}".replace(",", "."))
@@ -632,30 +680,25 @@ with abas[0]:
         int(dfm["tipo_indicador"].nunique() if "tipo_indicador" in dfm else 0),
     )
 
-    # ----------------- Gráficos -----------------
     st.info("📊 Gráficos: Visuais para responder às perguntas segundo os filtros aplicados")
 
-    if "tipo_indicador" in dfm and dfm["tipo_indicador"].notna().any():     
+    if "tipo_indicador" in dfm and dfm["tipo_indicador"].notna().any():
         with st.expander("Quais tipos de indicadores serão analisados?", expanded=True):
             st.plotly_chart(
                 bar_count(dfm, "tipo_indicador", "Distribuição por tipo de indicador"),
-                use_container_width=True
+                use_container_width=True,
             )
 
     if "fonte_dados" in dfm and dfm["fonte_dados"].notna().any():
         with st.expander("Quais fontes de dados dos indicadores analisados?", expanded=True):
             st.plotly_chart(
                 bar_count(dfm, "fonte_dados", "Distribuição por fonte de dados"),
-                use_container_width=True
+                use_container_width=True,
             )
 
-    # ----------------- Detalhe por indicador -----------------
     st.info("📋 Tabelas: Veja detalhes da Ficha de cada indicador")
 
-    tem_titulo = (
-        "titulo_indicador" in dfm
-        and dfm["titulo_indicador"].notna().any()
-    )
+    tem_titulo = "titulo_indicador" in dfm and dfm["titulo_indicador"].notna().any()
 
     if tem_titulo:
         titulos = (
@@ -665,14 +708,9 @@ with abas[0]:
             .sort_values()
             .tolist()
         )
-        sel = st.selectbox(
-            "Escolha o indicador",
-            options=titulos,
-            key="mat_sel_titulo",
-        )
+        sel = st.selectbox("Escolha o indicador", options=titulos, key="mat_sel_titulo")
 
         if sel:
-            # ordem lógica de campos
             ordem_campos = [
                 "tela",
                 "secao_tela",
@@ -691,13 +729,8 @@ with abas[0]:
             ]
             campos = [c for c in ordem_campos if c in dfm.columns]
 
-            linha = (
-                dfm[dfm["titulo_indicador"] == sel]
-                .iloc[0][campos]
-                .dropna()
-            )
+            linha = dfm[dfm["titulo_indicador"] == sel].iloc[0][campos].dropna()
 
-            # rótulos bonitinhos
             label_map = {
                 "tela": "Tela",
                 "secao_tela": "Seção da tela",
@@ -718,12 +751,11 @@ with abas[0]:
             labels = [label_map.get(c, c) for c in linha.index]
             valores = linha.values.tolist()
             col_labels = ["<b>Campo</b>", "<b>Descrição</b>"]
-            col_widths = [0.20, 0.80]  # 30% / 70%
 
             fig_tbl = go.Figure(
                 data=[
                     go.Table(
-                        columnwidth=[w * 100 for w in col_widths],  # Define proporções
+                        columnwidth=[20, 80],
                         header=dict(
                             values=col_labels,
                             fill_color="#E8F0FF",
@@ -751,484 +783,270 @@ with abas[0]:
     else:
         st.info("Nenhum título de indicador disponível para detalhamento.")
 
-# ====================== 2) Cadastro Estabelecimentos ======================
-with abas[1]:
-    st.subheader("🗂️ Cadastro de Estabelecimentos")
+# =====================================================================
+# 2) Cadastro Estabelecimentos
+# =====================================================================
+elif aba == "🗂️ Estabelecimentos":
+    st.subheader("🗂️ Estabelecimentos")
     df_est = load_table(TABLES["estabelecimentos"]).copy()
-    st.info("🔎 Filtros: Use os controles abaixo para refinar os resultados.")
 
-    # ----------------- Filtros -----------------
-    # Linha 1 – filtros principais
-    c1, c2, c3 = st.columns(3)
-    comp_sel = c1.multiselect("Competência", options=_opts(df_est, "competencia"), key="est_comp", placeholder="Selecione a(s) opção(ões) desejadas")
-    uf_sel   = c2.multiselect("Estabelecimento - UF", options=_opts(df_est, "no_uf"), key="est_uf",placeholder="Selecione a(s) opção(ões) desejadas")
-    reg_sel  = c3.multiselect("Estabelecimento - Região", options=_opts(df_est, "no_regiao"), key="est_reg",placeholder="Selecione a(s) opção(ões) desejadas")
+    # ------------------------ Filtros na sidebar ------------------------
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Estabelecimentos")
+        st.caption("Use os agrupadores abaixo para refinar o cadastro.")
 
-    # Linha 2 – território
-    c4, c5, c6 = st.columns(3)
-    mun_sel        = c4.multiselect("Estabelecimento - Município", options=_opts(df_est, "municipio"), key="est_mun",placeholder="Selecione a(s) opção(ões) desejadas")
-    reg_saude_sel  = c5.multiselect("Estabelecimento - Região de Saúde", options=_opts(df_est, "cod_regiao_saude"), key="est_regsaude",placeholder="Selecione a(s) opção(ões) desejadas")
-    micro_sel      = c6.multiselect("Estabelecimento - Microrregião Geográfica", options=_opts(df_est, "no_microrregiao"), key="est_micro",placeholder="Selecione a(s) opção(ões) desejadas")
+        # Filtros de período
+        with st.expander("Filtros de período", expanded=False):
+            comp_sel = st.multiselect("Competência", _opts(df_est, "competencia"),key="est_comp",placeholder="(Todos. Filtros opcionais)",)
 
-    # Linha 3 – perfil do estabelecimento
-    c7, c8, c9 = st.columns(3)
-    tipo_sel    = c7.multiselect("Estabelecimento - Tipo",    options=_opts(df_est, "tipo_do_estabelecimento"), key="est_tipo",placeholder="Selecione a(s) opção(ões) desejadas")
-    subtipo_sel = c8.multiselect("Estabelecimento - Subtipo", options=_opts(df_est, "subtipo_do_estabelecimento"), key="est_subtipo",placeholder="Selecione a(s) opção(ões) desejadas")
-    gestao_sel  = c9.multiselect("Estabelecimento - Gestão", options=_opts(df_est, "gestao"), key="est_gestao",placeholder="Selecione a(s) opção(ões) desejadas")
+        # Filtro de território
+        with st.expander("Filtro de Território", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            reg_sel  = st.multiselect("Região", _opts(df_est, "no_regiao"), key="est_reg",placeholder="(Todos. Filtros opcionais)",)
+            uf_sel   = st.multiselect("UF", _opts(df_est, "no_uf"), key="est_uf",placeholder="(Todos. Filtros opcionais)",)
+            meso_sel = st.multiselect("Mesorregião Geográfica", _opts(df_est, "no_mesorregiao"), key="est_meso",placeholder="(Todos. Filtros opcionais)",)
+            micro_sel = st.multiselect("Microrregião Geográfica", _opts(df_est, "no_microrregiao"), key="est_micro",placeholder="(Todos. Filtros opcionais)",)
+            reg_saude_sel = st.multiselect("Região de Saúde", _opts(df_est, "cod_regiao_saude"), key="est_regsaude",placeholder="(Todos. Filtros opcionais)",)
+            mun_sel = st.multiselect("Município", _opts(df_est, "municipio"), key="est_mun",placeholder="(Todos. Filtros opcionais)",)
+            ivs_sel = st.multiselect("Município IVS", _opts(df_est, "ivs"), key="est_ivs",placeholder="(Todos. Filtros opcionais)",)
 
-    c10, c11, c12 = st.columns(3)
-    convenio_sel = c10.multiselect("Estabelecimento - Convênio SUS", options=_opts(df_est, "convenio_sus"), key="est_convenio",placeholder="Selecione a(s) opção(ões) desejadas")
-    natureza_sel = c11.multiselect("Estabelecimento - Natureza jurídica", options=_opts(df_est, "categoria_natureza_juridica"), key="est_natjur",placeholder="Selecione a(s) opção(ões) desejadas")
-    status_sel   = c12.multiselect("Estabelecimento - Status", options=_opts(df_est, "status_do_estabelecimento"), key="est_status",placeholder="Selecione a(s) opção(ões) desejadas")
+        # Perfil do estabelecimento
+        with st.expander("Filtros de Perfil do Estabelecimento", expanded=False):
+            tipo_sel    = st.multiselect("Tipo", _opts(df_est, "tipo_do_estabelecimento"), key="est_tipo",placeholder="(Todos. Filtros opcionais)",)
+            subtipo_sel = st.multiselect("Subtipo", _opts(df_est, "subtipo_do_estabelecimento"), key="est_subtipo",placeholder="(Todos. Filtros opcionais)",)
+            gestao_sel  = st.multiselect("Gestão", _opts(df_est, "gestao"), key="est_gestao",placeholder="(Todos. Filtros opcionais)",)
+            convenio_sel = st.multiselect("Convênio SUS", _opts(df_est, "convenio_sus"), key="est_convenio",placeholder="(Todos. Filtros opcionais)",)
+            natureza_sel = st.multiselect("Natureza Jurídica", _opts(df_est, "categoria_natureza_juridica"), key="est_natjur",placeholder="(Todos. Filtros opcionais)",)
+            status_sel   = st.multiselect("Status", _opts(df_est, "status_do_estabelecimento"), key="est_status",placeholder="(Todos. Filtros opcionais)",)
 
+        # Habilitações oncológicas
+        with st.expander("Habilitações Oncológicas", expanded=False):
+            onco_cacon_sel = st.multiselect("CACON", ["Sim","Não"], key="est_onco_cacon", placeholder="(Todos. Filtros opcionais)",)
+            onco_unacon_sel = st.multiselect("UNACON", ["Sim","Não"], key="est_onco_unacon",placeholder="(Todos. Filtros opcionais)",)
+            onco_radio_sel  = st.multiselect("Radioterapia", ["Sim","Não"], key="est_onco_radio",placeholder="(Todos. Filtros opcionais)",)
+            onco_quimio_sel = st.multiselect("Quimioterapia", ["Sim","Não"], key="est_onco_quimio",placeholder="(Todos. Filtros opcionais)",)
+            hab_onco_cir_sel = st.multiselect("Onco Cirúrgica", ["Sim","Não"], key="est_hab_onco_cir",placeholder="(Todos. Filtros opcionais)",)
 
-    # Linha 4 – IVS
-    ivs_sel = st.multiselect("Estabelecimento - Município IVS (Índice de Vulnerabilidade Social)", options=_opts(df_est, "ivs"), key="est_ivs",placeholder="Selecione a(s) opção(ões) desejadas")
-    
-    def bool_multiselect(label: str, key: str, placeholder: str | None = None):
-        return st.multiselect(
-            label,
-            options=["Sim", "Não"],
-            key=key,
-            placeholder=placeholder,
-        )
+    # ------------------------ Detectar Mudanças ------------------------
+    filter_values = {
+        "comp": comp_sel,
+        "reg": reg_sel,
+        "uf": uf_sel,
+        "meso": meso_sel,
+        "micro": micro_sel,
+        "regsaude": reg_saude_sel,
+        "mun": mun_sel,
+        "ivs": ivs_sel,
+        "tipo": tipo_sel,
+        "subtipo": subtipo_sel,
+        "gestao": gestao_sel,
+        "convenio": convenio_sel,
+        "natjur": natureza_sel,
+        "status": status_sel,
+        "cacon": onco_cacon_sel,
+        "unacon": onco_unacon_sel,
+        "radio": onco_radio_sel,
+        "quimio": onco_quimio_sel,
+        "oncocir": hab_onco_cir_sel,
+    }
+    filters_changed = any(did_filters_change(k, v) for k, v in filter_values.items())
+    spinner = st.spinner("⏳ Atualizando resultados…") if filters_changed else DummySpinner()
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    with spinner:
+        dfe = df_est.copy()
 
-    with col1:
-        onco_cacon_sel = bool_multiselect(
-            "CACON",
-            "est_onco_cacon",
-            placeholder="Selecione a(s) opção(ões) desejadas"
-        )
-
-    with col2:
-        onco_unacon_sel = bool_multiselect(
-            "UNACON",
-            "est_onco_unacon",
-            placeholder="Selecione a(s) opção(ões) desejadas"
-        )
-
-    with col3:
-        onco_radio_sel = bool_multiselect(
-            "Radioterapia",
-            "est_onco_radio",
-            placeholder="Selecione a(s) opção(ões) desejadas"
-        )
-
-    with col4:
-        onco_quimio_sel = bool_multiselect(
-            "Quimioterapia",
-            "est_onco_quimio",
-            placeholder="Selecione a(s) opção(ões) desejadas"
-        )
-
-    with col5:
-        hab_onco_cir_sel = bool_multiselect(
-            "Onco Cirúrgica",
-            "est_hab_onco_cir",
-            placeholder="Selecione a(s) opção(ões) desejadas"
-        )
-
-    # ----------------- Aplicar filtros -----------------
-    dfe = df_est.copy()
-
-    def apply_multisel(df, col, sel):
-        if sel and col in df:
-            return df[df[col].isin(sel)]
-        return df
-
-    dfe = apply_multisel(dfe, "competencia",  comp_sel)
-    dfe = apply_multisel(dfe, "no_uf",        uf_sel)
-    dfe = apply_multisel(dfe, "no_regiao",    reg_sel)
-    dfe = apply_multisel(dfe, "municipio",    mun_sel)
-    dfe = apply_multisel(dfe, "cod_regiao_saude", reg_saude_sel)
-    dfe = apply_multisel(dfe, "no_microrregiao",  micro_sel)
-
-    dfe = apply_multisel(dfe, "tipo_do_estabelecimento",    tipo_sel)
-    dfe = apply_multisel(dfe, "subtipo_do_estabelecimento", subtipo_sel)
-    dfe = apply_multisel(dfe, "gestao",                     gestao_sel)
-    dfe = apply_multisel(dfe, "convenio_sus",               convenio_sel)
-    dfe = apply_multisel(dfe, "categoria_natureza_juridica", natureza_sel)
-    dfe = apply_multisel(dfe, "status_do_estabelecimento",  status_sel)
-    dfe = apply_multisel(dfe, "ivs",                        ivs_sel)
-
-    def apply_bool_multisel(df, col, sel):
-        if not sel or col not in df:
+        def apply_multisel(df, col, sel):
+            if sel and col in df:
+                return df[df[col].isin(sel)]
             return df
-        bool_series = df[col].astype("boolean")
-        allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
-        return df[bool_series.isin(allowed)]
 
-    dfe = apply_bool_multisel(dfe, "onco_cacon",                         onco_cacon_sel)
-    dfe = apply_bool_multisel(dfe, "onco_unacon",                        onco_unacon_sel)
-    dfe = apply_bool_multisel(dfe, "onco_radioterapia",                  onco_radio_sel)
-    dfe = apply_bool_multisel(dfe, "onco_quimioterapia",                 onco_quimio_sel)
-    dfe = apply_bool_multisel(dfe, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
+        dfe = apply_multisel(dfe, "competencia", comp_sel)
+        dfe = apply_multisel(dfe, "no_regiao", reg_sel)
+        dfe = apply_multisel(dfe, "no_uf", uf_sel)
+        dfe = apply_multisel(dfe, "no_mesorregiao", meso_sel)
+        dfe = apply_multisel(dfe, "no_microrregiao", micro_sel)
+        dfe = apply_multisel(dfe, "cod_regiao_saude", reg_saude_sel)
+        dfe = apply_multisel(dfe, "municipio", mun_sel)
+        dfe = apply_multisel(dfe, "ivs", ivs_sel)
+        dfe = apply_multisel(dfe, "tipo_do_estabelecimento", tipo_sel)
+        dfe = apply_multisel(dfe, "subtipo_do_estabelecimento", subtipo_sel)
+        dfe = apply_multisel(dfe, "gestao", gestao_sel)
+        dfe = apply_multisel(dfe, "convenio_sus", convenio_sel)
+        dfe = apply_multisel(dfe, "categoria_natureza_juridica", natureza_sel)
+        dfe = apply_multisel(dfe, "status_do_estabelecimento", status_sel)
 
-    # ----------------- Grandes números -----------------
-    st.info("📏 Grandes números: Visão rápida com filtros aplicados")
+        def apply_bool(df, col, sel):
+            if not sel or col not in df:
+                return df
+            allowed = []
+            if "Sim" in sel:  allowed.append(True)
+            if "Não" in sel:  allowed.append(False)
+            return df[df[col].astype("boolean").isin(allowed)]
 
-    # Total de estabelecimentos (CNES distintos)
-    tot_est = dfe["cnes"].nunique() if "cnes" in dfe else len(dfe)
+        dfe = apply_bool(dfe, "onco_cacon", onco_cacon_sel)
+        dfe = apply_bool(dfe, "onco_unacon", onco_unacon_sel)
+        dfe = apply_bool(dfe, "onco_radioterapia", onco_radio_sel)
+        dfe = apply_bool(dfe, "onco_quimioterapia", onco_quimio_sel)
+        dfe = apply_bool(dfe, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
 
-    # Médias por Região e por UF
-    if "cod_regiao_saude" in dfe and "cnes" in dfe:
-        reg_counts = dfe.dropna(subset=["cod_regiao_saude"]).groupby("cod_regiao_saude")["cnes"].nunique()
-        media_por_regiao = float(reg_counts.mean()) if not reg_counts.empty else 0.0
-    else:
-        media_por_regiao = 0.0
+        # ===================== KPIs =====================
+        st.info("📏 Grandes números: Visão rápida com filtros aplicados")
 
-    if "no_uf" in dfe and "cnes" in dfe:
-        uf_counts = dfe.dropna(subset=["no_uf"]).groupby("no_uf")["cnes"].nunique()
-        media_por_uf = float(uf_counts.mean()) if not uf_counts.empty else 0.0
-    else:
-        media_por_uf = 0.0
-
-    def count_hab(col):
-        if col not in dfe or "cnes" not in dfe:
-            return 0
-        s = dfe[col].astype("boolean")
-        return int(dfe[s]["cnes"].nunique())
-
-    n_cacon   = count_hab("onco_cacon")
-    n_unacon  = count_hab("onco_unacon")
-    n_radio   = count_hab("onco_radioterapia")
-    n_quimio  = count_hab("onco_quimioterapia")
-    n_onco_cir = count_hab("habilitacao_agrupado_onco_cirurgica")
-
-    # Layout dos KPIs
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Número de estabelecimentos", fmt_num(tot_est, 0))
-    c2.metric("Média de estabelecimentos por Região de Saúde",fmt_num(media_por_regiao, 1),)
-    c3.metric("Média de estabelecimentos por UF",fmt_num(media_por_uf, 1),)
-    c4.metric("Estab. habilitados CACON", fmt_num(n_cacon, 0))
-
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("Estab. habilitados UNACON", fmt_num(n_unacon, 0))
-    c6.metric("Estab. habilitados Radioterapia", fmt_num(n_radio, 0))
-    c7.metric("Estab. habilitados Quimioterapia", fmt_num(n_quimio, 0))
-    c8.metric("Estab. habilitados Onco Cirúrgica", fmt_num(n_onco_cir, 0))
-
-    # Gráficos = Tabela 1 CNES Serviços Especializados (última competência)
-
-    st.info("📊 Gráficos: Visuais para responder às perguntas segundo os filtros aplicados")
-
-    # 1) Número de estabelecimentos por Tipo de Estabelecimento
-    with st.expander(
-        "Número de estabelecimentos por Tipo de Estabelecimento", expanded=True
-    ):
-        if "tipo_do_estabelecimento" in dfe and dfe["tipo_do_estabelecimento"].notna().any():
-            fig_tipo = pareto_barh(
-                dfe,
-                "tipo_do_estabelecimento",
-                None,
-                "Número de estabelecimentos por Tipo de Estabelecimento",
-                "Qtde",
-            )
-            st.plotly_chart(fig_tipo, use_container_width=True)
-        else:
-            st.write("Nenhum dado disponível para este gráfico.")
-
-    # 2) Número de estabelecimentos por Tipo de Gestão
-    with st.expander(
-        "Número de estabelecimentos por Tipo de Gestão", expanded=True
-    ):
-        if "gestao" in dfe and dfe["gestao"].notna().any():
-            fig_gestao = bar_count(
-                dfe,
-                "gestao",
-                "Número de estabelecimentos por Tipo de Gestão",
-                24,
-            )
-            st.plotly_chart(fig_gestao, use_container_width=True)
-        else:
-            st.write("Nenhum dado disponível para este gráfico.")
-
-    # 3) Número de estabelecimentos por Convênio SUS
-    with st.expander(
-        "Número de estabelecimentos por Convênio SUS", expanded=True
-    ):
-        if "convenio_sus" in dfe and dfe["convenio_sus"].notna().any():
-            # exemplo de agregação – ajuste os nomes conforme sua base
-            df_conv = (
-                df_est
-                .groupby("convenio_sus", dropna=False)["cnes"]   # ou a coluna de id do estabelecimento
-                .nunique()
-                .reset_index(name="qtde_estab")
-            )
-
-            fig_convenio = pie_standard(
-                df_conv,
-                names="convenio_sus",
-                values="qtde_estab",
-                title="Número de estabelecimentos por Convênio SUS",
-                hole=0.35,                 # pizza com “buraco” (donut)
-                top_n=None,                # se quiser limitar e agrupar em “Outros”, defina um número
-                legend_pos="below_title",
-                percent_digits=1,
-                number_digits=0,
-                thousands_sep=".",
-            )
-
-            st.plotly_chart(fig_convenio, use_container_width=True)
-        else:
-            st.write("Nenhum dado disponível para este gráfico.")
-
-    # 4) Número de estabelecimentos por Categoria da Natureza Jurídica
-    with st.expander(
-        "Número de estabelecimentos por Categoria da Natureza Jurídica", expanded=True
-    ):
-        col_nat = "categoria_natureza_juridica"
-        if col_nat in dfe and dfe[col_nat].notna().any():
-            fig_nat = bar_count(
-                dfe,
-                col_nat,
-                "Número de estabelecimentos por Categoria da Natureza Jurídica",
-                28,
-            )
-            st.plotly_chart(fig_nat, use_container_width=True)
-        else:
-            st.write("Nenhum dado disponível para este gráfico.")
-
-    # ==============================================================
-    # Tabela descritiva do cadastro de cada estabelecimento
-    # ==============================================================
-
-    st.info(
-        "📋 Tabela: Veja os dados granulares que montaram os indicadores expostos "
-        "(CNES Serviços Especializados, última competência)"
-    )
-
-    # escolhe colunas mais importantes, se existirem
-    cols_base = [
-        "cnes",
-        "nome_fantasia",
-        "municipio",
-        "no_uf",
-        "tipo_do_estabelecimento",
-        "subtipo_do_estabelecimento",
-        "gestao",
-        "convenio_sus",
-        "categoria_natureza_juridica",
-    ]
-    cols_exist = [c for c in cols_base if c in dfe.columns]
-
-    if cols_exist:
-        st.dataframe(
-            dfe[cols_exist].sort_values(["no_uf", "municipio", "nome_fantasia"]),
-            use_container_width=True,
-            hide_index=True,
+        tot_est = dfe["cnes"].nunique() if "cnes" in dfe else len(dfe)
+        media_por_regiao = (
+            dfe.groupby("cod_regiao_saude")["cnes"].nunique().mean()
+            if "cod_regiao_saude" in dfe else 0
         )
-    else:
-        st.write("Não há colunas de cadastro disponíveis para exibir a tabela.")
+        media_por_uf = (
+            dfe.groupby("no_uf")["cnes"].nunique().mean()
+            if "no_uf" in dfe else 0
+        )
 
-# ====================== 3) Cadastro Serviços ======================
-# ====================== 3) Cadastro Serviços ======================
-with abas[2]:
+        def hab(col):
+            return int(dfe[dfe[col].astype("boolean")]["cnes"].nunique()) if col in dfe else 0
+
+        n_cacon = hab("onco_cacon")
+        n_unacon = hab("onco_unacon")
+        n_radio = hab("onco_radioterapia")
+        n_quimio = hab("onco_quimioterapia")
+        n_cir = hab("habilitacao_agrupado_onco_cirurgica")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Estabelecimentos", tot_est)
+        c2.metric("Média por Reg. Saúde", round(media_por_regiao, 1))
+        c3.metric("Média por UF", round(media_por_uf, 1))
+        c4.metric("CACON", n_cacon)
+
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("UNACON", n_unacon)
+        c6.metric("Radioterapia", n_radio)
+        c7.metric("Quimioterapia", n_quimio)
+        c8.metric("Onco Cirúrgica", n_cir)
+
+        # ===================== Gráficos =====================
+        st.info("📊 Gráficos: Respostas segundo os filtros aplicados")
+
+        with st.expander("Por tipo de estabelecimento", expanded=True):
+            if "tipo_do_estabelecimento" in dfe:
+                fig = pareto_barh(dfe, "tipo_do_estabelecimento", None, "Estab. por Tipo", "Qtde")
+                st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Por tipo de gestão", expanded=True):
+            if "gestao" in dfe:
+                fig = bar_count(dfe, "gestao", "Estab. por Gestão", 24)
+                st.plotly_chart(fig, use_container_width=True)
+
+        with st.expander("Por Convênio SUS", expanded=True):
+            if "convenio_sus" in dfe:
+                df_conv = dfe.groupby("convenio_sus")["cnes"].nunique().reset_index(name="qtde")
+                fig = pie_standard(df_conv, "convenio_sus", "qtde", "Convênio SUS")
+                st.plotly_chart(fig, use_container_width=True)
+
+        # ===================== Tabela =====================
+        st.info("📋 Dados Granulares (Última Competência)")
+
+        cols = [
+            "cnes","nome_fantasia","municipio","no_uf",
+            "tipo_do_estabelecimento","subtipo_do_estabelecimento",
+            "gestao","convenio_sus","categoria_natureza_juridica"
+        ]
+        cols = [c for c in cols if c in dfe]
+        if cols:
+            st.dataframe(dfe[cols].sort_values(["no_uf","municipio"]), use_container_width=True)
+
+# =====================================================================
+# 3) Cadastro Serviços
+# =====================================================================
+elif aba == "🗂️ Cadastro Serviços":
     st.subheader("🗂️ Cadastro de Serviços Especializados")
-
     df_srv = load_table(TABLES["servicos"]).copy()
 
-    st.info("🔎 Filtros: Use os controles abaixo para refinar os resultados.")
-
-    # helper local só para não depender de _opts global
+    # helper local
     def _opts_srv(col: str):
         if col not in df_srv:
             return []
         return sorted(df_srv[col].dropna().unique())
 
-    # ----------------- Filtros gerais (território + perfil do estab.) -----------------
+    # ----------------- Filtros na sidebar -----------------
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Serviços especializados")
+        st.caption("Use os agrupadores abaixo para refinar o cadastro.")
 
-    # Linha 1 – principais
-    c1, c2, c3 = st.columns(3)
-    comp_sel = c1.multiselect(
-        "Competência",
-        options=_opts_srv("servicos_especializados_competencia"),
-        key="srv_comp",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    uf_sel = c2.multiselect(
-        "Estabelecimento - UF",
-        options=_opts_srv("ibge_no_uf"),
-        key="srv_uf",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    reg_sel = c3.multiselect(
-        "Estabelecimento - Região (Mesorregião)",
-        options=_opts_srv("ibge_no_mesorregiao"),
-        key="srv_reg",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+        with st.expander("Filtros de período", expanded=False):
+            comp_sel = st.multiselect(
+                "Competência",
+                options=_opts_srv("competencia"),
+                key="srv_comp",
+                placeholder="(Todos. Filtros opcionais)",)
 
-    # Linha 2 – território
-    c4, c5, c6 = st.columns(3)
-    mun_sel = c4.multiselect(
-        "Estabelecimento - Município",
-        options=_opts_srv("servicos_especializados_municipio"),
-        key="srv_mun",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    reg_saude_sel = c5.multiselect(
-        "Estabelecimento - Região de Saúde",
-        options=_opts_srv("ibge_no_regiao_saude"),
-        key="srv_regsaude",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    micro_sel = c6.multiselect(
-        "Estabelecimento - Microrregião Geográfica",
-        options=_opts_srv("ibge_no_microrregiao"),
-        key="srv_micro",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+        with st.expander("Filtro de Território", expanded=False):
+            reg_sel  = st.multiselect("Região", options=_opts_srv("no_regiao"), key="srv_reg",placeholder="(Todos. Filtros opcionais)",)
+            uf_sel   = st.multiselect("UF", options=_opts_srv("no_uf"), key="srv_uf",placeholder="(Todos. Filtros opcionais)",)
+            meso_sel = st.multiselect("Mesorregião", options=_opts_srv("no_mesorregiao"), key="srv_meso",placeholder="(Todos. Filtros opcionais)",)
+            micro_sel = st.multiselect("Microrregião", options=_opts_srv("no_microrregiao"), key="srv_micro",placeholder="(Todos. Filtros opcionais)",)
+            reg_saude_sel  = st.multiselect("Região de Saúde", options=_opts_srv("cod_regiao_saude"), key="srv_regsaude",placeholder="(Todos. Filtros opcionais)",)
+            mun_sel   = st.multiselect("Município", options=_opts_srv("municipio"), key="srv_mun",placeholder="(Todos. Filtros opcionais)",)
+            ivs_sel   = st.multiselect("Município IVS (Índice de Vulnerabilidade Social)", options=_opts_srv("ivs"), key="srv_ivs",placeholder="(Todos. Filtros opcionais)",)
 
-    # Linha 3 – perfil do estabelecimento
-    c7, c8, c9 = st.columns(3)
-    tipo_sel = c7.multiselect(
-        "Estabelecimento - Tipo",
-        options=_opts_srv("servicos_especializados_tipo_do_estabelecimento"),
-        key="srv_tipo",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    subtipo_sel = c8.multiselect(
-        "Estabelecimento - Subtipo",
-        options=_opts_srv("servicos_especializados_subtipo_do_estabelecimento"),
-        key="srv_subtipo",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    gestao_sel = c9.multiselect(
-        "Estabelecimento - Gestão",
-        options=_opts_srv("servicos_especializados_gestao"),
-        key="srv_gestao",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+        with st.expander("Perfil do Estabelecimento", expanded=False):
+            tipo_sel    = st.multiselect("Estabelecimento - Tipo", options=_opts_srv("tipo_novo_do_estabelecimento"), key="srv_tipo",placeholder="(Todos. Filtros opcionais)",)
+            subtipo_sel = st.multiselect("Estabelecimento - Subtipo", options=_opts_srv("subtipo_do_estabelecimento"), key="srv_subtipo",placeholder="(Todos. Filtros opcionais)",)
+            gestao_sel  = st.multiselect("Estabelecimento - Gestão", options=_opts_srv("gestao"), key="srv_gestao",placeholder="(Todos. Filtros opcionais)",)
+            convenio_sel = st.multiselect("Estabelecimento - Convênio SUS", options=_opts_srv("convenio_sus"), key="srv_convenio",placeholder="(Todos. Filtros opcionais)",)
+            natureza_sel = st.multiselect("Estabelecimento - Natureza jurídica", options=_opts_srv("categoria_natureza_juridica"), key="srv_natjur",placeholder="(Todos. Filtros opcionais)",)
+            status_sel   = st.multiselect("Estabelecimento - Status", options=_opts_srv("status_do_estabelecimento"), key="srv_status",placeholder="(Todos. Filtros opcionais)",)
 
-    # Linha 4 – convênio / natureza / status
-    c10, c11, c12 = st.columns(3)
-    convenio_sel = c10.multiselect(
-        "Estabelecimento - Convênio SUS",
-        options=_opts_srv("servicos_especializados_convenio_sus"),
-        key="srv_convenio",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    natureza_sel = c11.multiselect(
-        "Estabelecimento - Natureza jurídica",
-        options=_opts_srv("servicos_especializados_categoria_natureza_juridica"),
-        key="srv_natjur",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    status_sel = c12.multiselect(
-        "Estabelecimento - Status",
-        options=_opts_srv("servicos_especializados_status_do_estabelecimento"),
-        key="srv_status",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+        with st.expander("Habilitações Oncológicas", expanded=False):
+            def bool_multiselect(label: str, key: str):
+                return st.multiselect(label, options=["Sim", "Não"], key=key)
 
-    # Linha 5 – IVS
-    ivs_sel = st.multiselect(
-        "Estabelecimento - Município IVS (Índice de Vulnerabilidade Social)",
-        options=_opts_srv("ibge_ivs"),
-        key="srv_ivs",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+            onco_cacon_sel = bool_multiselect("CACON", "srv_onco_cacon")
+            onco_unacon_sel = bool_multiselect("UNACON", "srv_onco_unacon")
+            onco_radio_sel = bool_multiselect("Radioterapia", "srv_onco_radio")
+            onco_quimio_sel = bool_multiselect("Quimioterapia", "srv_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica", "srv_hab_onco_cir")
 
-    # ----------------- Filtros de habilitações oncológicas (booleans) -----------------
-    def bool_multiselect(label: str, key: str, placeholder: str | None = None):
-        return st.multiselect(
-            label,
-            options=["Sim", "Não"],
-            key=key,
-            placeholder=placeholder,
-        )
+        with st.expander("Filtros específicos de serviços especializados", expanded=False):
+            servico_sel = st.multiselect(
+                "Serviço especializado",
+                options=_opts_srv("servico"),
+                key="srv_servico",
+                placeholder="Selecione a(s) opção(ões) desejadas",
+            )
+            servico_class_sel = st.multiselect(
+                "Classificação do serviço especializado",
+                options=_opts_srv("servico_classificacao"),
+                key="srv_servico_class",
+                placeholder="Selecione a(s) opção(ões) desejadas",
+            )
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        onco_cacon_sel = bool_multiselect(
-            "CACON", "srv_onco_cacon",
-            placeholder="Selecione a(s) opção(ões) desejadas",
-        )
-    with col2:
-        onco_unacon_sel = bool_multiselect(
-            "UNACON", "srv_onco_unacon",
-            placeholder="Selecione a(s) opção(ões) desejadas",
-        )
-    with col3:
-        onco_radio_sel = bool_multiselect(
-            "Radioterapia", "srv_onco_radio",
-            placeholder="Selecione a(s) opção(ões) desejadas",
-        )
-    with col4:
-        onco_quimio_sel = bool_multiselect(
-            "Quimioterapia", "srv_onco_quimio",
-            placeholder="Selecione a(s) opção(ões) desejadas",
-        )
-    with col5:
-        hab_onco_cir_sel = bool_multiselect(
-            "Onco Cirúrgica", "srv_hab_onco_cir",
-            placeholder="Selecione a(s) opção(ões) desejadas",
-        )
-
-    # ----------------- Filtros específicos de serviços especializados -----------------
-    st.markdown(
-        """
-        <hr style='margin-top:1.2rem; margin-bottom:1.2rem; opacity:0.35;'>
-        <div style='font-size:0.95rem; font-weight:600; margin-bottom:0.6rem;'>
-            Filtros específicos de serviços especializados
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    cA, cB = st.columns(2)
-    servico_sel = cA.multiselect(
-        "Serviço especializado",
-        options=_opts_srv("servicos_especializados_servico"),
-        key="srv_servico",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    servico_class_sel = cB.multiselect(
-        "Classificação do serviço especializado",
-        options=_opts_srv("servicos_especializados_servico_classificacao"),
-        key="srv_servico_class",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-
-    d1, d2, d3, d4, d5 = st.columns(5)
-    amb_sus_sel = d1.multiselect(
-        "Ambulatorial SUS",
-        options=_opts_srv("servicos_especializados_servico_ambulatorial_sus"),
-        key="srv_amb_sus",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    amb_nao_sus_sel = d2.multiselect(
-        "Ambulatorial não SUS",
-        options=_opts_srv("servicos_especializados_servico_ambulatorial_nao_sus"),
-        key="srv_amb_nao_sus",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    hosp_sus_sel = d3.multiselect(
-        "Hospitalar SUS",
-        options=_opts_srv("servicos_especializados_servico_hospitalar_sus"),
-        key="srv_hosp_sus",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    hosp_nao_sus_sel = d4.multiselect(
-        "Hospitalar não SUS",
-        options=_opts_srv("servicos_especializados_servico_hospitalar_nao_sus"),
-        key="srv_hosp_nao_sus",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
-    terceiro_sel = d5.multiselect(
-        "Terceiro",
-        options=_opts_srv("servicos_especializados_servico_terceiro"),
-        key="srv_terceiro",
-        placeholder="Selecione a(s) opção(ões) desejadas",
-    )
+            amb_sus_sel = st.multiselect(
+                "Ambulatorial SUS",
+                options=_opts_srv("servico_ambulatorial_sus"),
+                key="srv_amb_sus",
+            )
+            amb_nao_sus_sel = st.multiselect(
+                "Ambulatorial não SUS",
+                options=_opts_srv("servico_ambulatorial_nao_sus"),
+                key="srv_amb_nao_sus",
+            )
+            hosp_sus_sel = st.multiselect(
+                "Hospitalar SUS",
+                options=_opts_srv("servico_hospitalar_sus"),
+                key="srv_hosp_sus",
+            )
+            hosp_nao_sus_sel = st.multiselect(
+                "Hospitalar não SUS",
+                options=_opts_srv("servico_hospitalar_nao_sus"),
+                key="srv_hosp_nao_sus",
+            )
+            terceiro_sel = st.multiselect(
+                "Terceiro",
+                options=_opts_srv("servico_terceiro"),
+                key="srv_terceiro",
+            )
 
     # ----------------- Aplicar filtros -----------------
     dfs = df_srv.copy()
@@ -1238,32 +1056,29 @@ with abas[2]:
             return df[df[col].isin(sel)]
         return df
 
-    # filtros gerais
-    dfs = apply_multisel(dfs, "servicos_especializados_competencia", comp_sel)
-    dfs = apply_multisel(dfs, "ibge_no_uf", uf_sel)
-    dfs = apply_multisel(dfs, "ibge_no_mesorregiao", reg_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_municipio", mun_sel)
-    dfs = apply_multisel(dfs, "ibge_no_regiao_saude", reg_saude_sel)
-    dfs = apply_multisel(dfs, "ibge_no_microrregiao", micro_sel)
+    dfs = apply_multisel(dfs, "competencia", comp_sel)
+    dfs = apply_multisel(dfs, "no_uf", uf_sel)
+    dfs = apply_multisel(dfs, "no_regiao", reg_sel)
+    dfs = apply_multisel(dfs, "no_mesorregiao", meso_sel)
+    dfs = apply_multisel(dfs, "no_microrregiao", micro_sel)
+    dfs = apply_multisel(dfs, "cod_regiao_saude", reg_saude_sel)
+    dfs = apply_multisel(dfs, "municipio", mun_sel)
+    dfs = apply_multisel(dfs, "ivs", ivs_sel)
 
-    dfs = apply_multisel(dfs, "servicos_especializados_tipo_do_estabelecimento", tipo_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_subtipo_do_estabelecimento", subtipo_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_gestao", gestao_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_convenio_sus", convenio_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_categoria_natureza_juridica", natureza_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_status_do_estabelecimento", status_sel)
-    dfs = apply_multisel(dfs, "ibge_ivs", ivs_sel)
+    dfs = apply_multisel(dfs, "tipo_novo_do_estabelecimento", tipo_sel)
+    dfs = apply_multisel(dfs, "subtipo_do_estabelecimento", subtipo_sel)
+    dfs = apply_multisel(dfs, "gestao", gestao_sel)
+    dfs = apply_multisel(dfs, "convenio_sus", convenio_sel)
+    dfs = apply_multisel(dfs, "categoria_natureza_juridica", natureza_sel)
+    dfs = apply_multisel(dfs, "status_do_estabelecimento", status_sel)
 
-    # filtros booleanos
     def apply_bool_multisel(df, col, sel):
         if not sel or col not in df:
             return df
         s = df[col].astype("boolean")
         allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
+        if "Sim" in sel: allowed.append(True)
+        if "Não" in sel: allowed.append(False)
         return df[s.isin(allowed)]
 
     dfs = apply_bool_multisel(dfs, "onco_cacon", onco_cacon_sel)
@@ -1272,133 +1087,13 @@ with abas[2]:
     dfs = apply_bool_multisel(dfs, "onco_quimioterapia", onco_quimio_sel)
     dfs = apply_bool_multisel(dfs, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
 
-    # filtros específicos de serviços
-    dfs = apply_multisel(dfs, "servicos_especializados_servico", servico_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_classificacao", servico_class_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_ambulatorial_sus", amb_sus_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_ambulatorial_nao_sus", amb_nao_sus_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_hospitalar_sus", hosp_sus_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_hospitalar_nao_sus", hosp_nao_sus_sel)
-    dfs = apply_multisel(dfs, "servicos_especializados_servico_terceiro", terceiro_sel)
+    dfs = apply_multisel(dfs, "servico", servico_sel)
+    dfs = apply_multisel(dfs, "servico_classificacao", servico_class_sel)
+    dfs = apply_multisel(dfs, "servico_ambulatorial_sus", amb_sus_sel)
+    dfs = apply_multisel(dfs, "servico_ambulatorial_nao_sus", amb_nao_sus_sel)
+    dfs = apply_multisel(dfs, "servico_hospitalar_sus", hosp_sus_sel)
+    dfs = apply_multisel(dfs, "servico_hospitalar_nao_sus", hosp_nao_sus_sel)
+    dfs = apply_multisel(dfs, "servico_terceiro", terceiro_sel)
 
-    # A partir daqui use `dfs` nos seus KPIs / gráficos / tabelas da aba de Serviços
     st.info("📊 Distribuição de serviços especializados (após filtros)")
     st.write(f"Total de linhas após filtros: {len(dfs):,}".replace(",", "."))
-
-# ====================== 4) Habilitação ======================
-with abas[3]:
-    st.subheader("✅ Habilitação")
-
-    df_hab = load_table(TABLES["habilitacao"])
-
-    st.info("🔎 Filtros — Habilitação")
-    dfh = render_with_spinner_once("habilitacao", df_hab, FILTER_SPEC["habilitacao"], prefix="hab")
-
-    col = "referencia_habilitacao_no_habilitacao"
-    if col in dfh and dfh[col].notna().any():
-        st.plotly_chart(
-            pareto_barh(dfh, col, None, "Habilitações — Pareto", "Qtde"),
-            use_container_width=True,
-        )
-
-# ====================== 5) Leitos ======================
-with abas[4]:
-    st.subheader("🛏️ Leitos")
-
-    df_lei = load_table(TABLES["leitos"])
-
-    st.info("🔎 Filtros — Leitos")
-    dfl = render_with_spinner_once("leitos", df_lei, FILTER_SPEC["leitos"], prefix="lei")
-
-    if {"leitos_tipo_leito_nome", "leitos_quantidade_total"}.issubset(dfl.columns):
-        st.plotly_chart(
-            pareto_barh(
-                dfl,
-                "leitos_tipo_leito_nome",
-                "leitos_quantidade_total",
-                "Leitos por tipo (soma quantidade total)",
-                "Qtde",
-            ),
-            use_container_width=True,
-        )
-
-# ====================== 6) Equipamentos ======================
-with abas[5]:
-    st.subheader("🧰 Equipamentos")
-
-    df_eq = load_table(TABLES["equipamentos"])
-
-    st.info("🔎 Filtros — Equipamentos")
-    dfeq = render_with_spinner_once("equipamentos", df_eq, FILTER_SPEC["equipamentos"], prefix="eq")
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Registros", f"{len(dfeq):,}".replace(",", "."))
-    c2.empty()
-    c3.empty()
-
-    if "equipamentos_tipo_equipamento" in dfeq:
-        st.plotly_chart(
-            bar_count(
-                dfeq,
-                "equipamentos_tipo_equipamento",
-                "Distribuição por tipo de equipamento",
-                28,
-            ),
-            use_container_width=True,
-        )
-
-# ====================== 7) Profissionais ======================
-with abas[6]:
-    st.subheader("🧑 Profissionais")
-
-    df_prof = load_table(TABLES["profissionais"])
-
-    st.info("🔎 Filtros — Profissionais")
-    dfp = render_with_spinner_once("profissionais", df_prof, FILTER_SPEC["profissionais"], prefix="pro")
-
-    for cand in ["cbo_ocupacao", "cbo_descricao", "profissionais_tipo_cbo"]:
-        if cand in dfp and dfp[cand].notna().any():
-            st.plotly_chart(
-                pareto_barh(
-                    dfp,
-                    cand,
-                    None,
-                    "Distribuição de profissionais por ocupação",
-                    "Qtde",
-                ),
-                use_container_width=True,
-            )
-            break
-
-# ====================== 8) Registros Hospitalares ======================
-with abas[7]:
-    st.subheader("📋 Registros Hospitalares")
-    st.info("Conteúdo em construção.")
-
-# ====================== 9) Metodologia ======================
-with abas[8]:
-    st.subheader("📐 Metodologia")
-    st.markdown(
-        """
-        Esta aba resume a **metodologia de construção do Complexo Produtivo Oncológico**:
-
-        - **Fontes de dados**: CNES (estabelecimentos, serviços especializados, leitos, equipamentos,
-          profissionais), base da Matriz de Indicadores e integrações internas.
-        - **Critérios de inclusão**:
-            - Estabelecimentos com habilitação CACON/UNACON, serviços de radioterapia e quimioterapia,
-              e leitos/serviços cirúrgicos oncológicos;
-            - Vínculo SUS e situação de funcionamento ativa.
-        - **Unidades de análise**: estabelecimento, município, região de saúde e UF.
-        - **Transformações**:
-            - Normalização de códigos CNES/IBGE;
-            - Agregações por competência (ano/mês);
-            - Criação de flags booleanas para componentes do complexo (onco_cacon, onco_unacon etc.).
-        - **Matriz de Indicadores**:
-            - Cada linha corresponde a um indicador com definição, fórmula, numerador, denominador,
-              fonte de dados e nível de desagregação.
-        - **Atualização**:
-            - Periodicidade de atualização conforme carga das bases CNES e demais fontes.
-
-        *(Texto meramente ilustrativo — você pode substituir aqui pela descrição oficial da metodologia.)*
-        """
-    )

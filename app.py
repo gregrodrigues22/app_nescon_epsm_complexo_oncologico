@@ -1,20 +1,10 @@
 # ---------------------------------------------------------------
 # Set up
 # ---------------------------------------------------------------
-import io 
-import re
+import io
 import streamlit as st
-import plotly.graph_objects as go
 from pathlib import Path
-import numpy as np
 import pandas as pd
-import json, unicodedata
-import os
-from datetime import datetime
-import pytz
-import plotly.express as px
-import hashlib
-from streamlit.runtime.scriptrunner import get_script_run_ctx
 
 # ---------------------------------------------------------------
 # Config da página
@@ -25,6 +15,7 @@ st.set_page_config(layout="wide", page_title="📊 Complexos Produtivos em Saúd
 APP_DIR = Path(__file__).resolve().parent
 ASSETS = APP_DIR / "assets"
 
+
 def first_existing(*relative_paths: str) -> Path | None:
     for rel in relative_paths:
         p = ASSETS / rel
@@ -32,7 +23,57 @@ def first_existing(*relative_paths: str) -> Path | None:
             return p
     return None
 
+
 LOGO = first_existing("logo.png", "logo.jpg", "logo.jpeg", "logo.webp")
+
+# ---------------- Esconder navegação padrão da sidebar ----------------
+st.markdown(
+    """
+<style>
+/* Esconde a lista padrão de páginas no topo da sidebar */
+[data-testid="stSidebarNav"] { display: none; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+# --- helper para evitar crash do st.page_link quando não é multipage ---
+def safe_page_link(path: str, label: str, icon: str | None = None):
+    """
+    Cria link para página se o arquivo existir.
+    Caso contrário, mostra botão desabilitado (em breve),
+    sem quebrar o app.
+    """
+    full = APP_DIR / path
+    try:
+        if full.exists():
+            st.page_link(path, label=label, icon=icon)
+        else:
+            st.button(label, icon=icon, disabled=True, help="Página não disponível neste app.")
+    except Exception:
+        st.button(label, icon=icon, disabled=True, help="Navegação multipage indisponível aqui.")
+
+
+# ---------------- Sidebar (único) ----------------
+with st.sidebar:
+    if LOGO:
+        st.image(str(LOGO), use_container_width=True)
+
+    st.markdown("<hr style='border:none;border-top:1px solid #ccc;'/>", unsafe_allow_html=True)
+    st.subheader("Conecte-se")
+    st.markdown(
+        """
+- 💼 [LinkedIn](https://www.linkedin.com/in/gregorio-healthdata/)
+- ▶️ [YouTube](https://www.youtube.com/@Patients2Python)
+- 📸 [Instagram](https://www.instagram.com/patients2python/)
+- 🌐 [Site](https://patients2python.com.br/)
+- 🐙 [GitHub](https://github.com/gregrodrigues22)
+- 👥💬 [Comunidade](https://chat.whatsapp.com/CBn0GBRQie5B8aKppPigdd)
+- 🤝💬 [WhatsApp](https://patients2python.sprinthub.site/r/whatsapp-olz)
+- 🎓 [Escola](https://app.patients2python.com.br/browse)
+        """,
+        unsafe_allow_html=True,
+    )
 
 # ---------------- Cabeçalho ----------------
 st.markdown(
@@ -45,84 +86,52 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.markdown("""
-<style>
-/* Esconde a lista padrão de páginas no topo da sidebar */
-[data-testid="stSidebarNav"] { display: none; }
-</style>
-""", unsafe_allow_html=True)
+# =========================================================
+# Abas customizadas (Introdução / Tutorial)
+# =========================================================
+def custom_tabs(tabs_list, default=0, cor="rgb(0,161,178)"):
+    active_tab = st.radio("", tabs_list, index=default, horizontal=True)
+    selected = tabs_list.index(active_tab) + 1
 
-# --- helper para evitar crash do st.page_link quando não é multipage ---
-def safe_page_link(path: str, label: str, icon: str | None = None):
-    try:
-        if (APP_DIR / path).exists():
-            st.page_link(path, label=label, icon=icon)
-        else:
-            st.button(label, icon=icon, disabled=True, help="Página não disponível neste app.")
-    except Exception:
-        st.button(label, icon=icon, disabled=True, help="Navegação multipage indisponível aqui.")
+    st.markdown(
+        f"""
+        <style>
+        div[role=radiogroup] {{
+            border-bottom: 2px solid rgba(49, 51, 63, 0.1);
+            flex-direction: row;
+            gap: 2rem;
+        }}
+        div[role=radiogroup] > label > div:first-of-type {{
+            display: none;
+        }}
+        div[role=radiogroup] label {{
+            padding-bottom: 0.5em;
+            border-radius: 0;
+            position: relative;
+            top: 3px;
+            cursor: pointer;
+        }}
+        div[role=radiogroup] label p {{
+            font-weight: 500;
+        }}
+        div[role=radiogroup] label:nth-child({selected}) {{
+            border-bottom: 3px solid {cor};
+        }}
+        div[role=radiogroup] label:nth-child({selected}) p {{
+            color: {cor};
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# ---------------- Sidebar (único) ----------------
-with st.sidebar:
-    if LOGO:
-        st.image(str(LOGO), use_container_width=True)
-    else:
-        st.warning(f"Logo não encontrada em {ASSETS}/logo.(png|jpg|jpeg|webp)")
-    st.markdown("<hr style='border:none;border-top:1px solid #ccc;'/>", unsafe_allow_html=True)
-    st.header("Menu")
+    return active_tab
 
-    # ---- Navegação por Complexo Produtivo ----
-    with st.expander("Complexos Produtivos", expanded=True):
-        safe_page_link("pages/complexo_oncologia.py",
-                       label="Oncologia",
-                       icon="🎗️")
-        safe_page_link("pages/complexo_cardiovascular.py",
-                       label="Cardiovascular",
-                       icon="❤️")
-        safe_page_link("pages/complexo_ortopedia_trauma.py",
-                       label="Ortopedia e Trauma",
-                       icon="🦴")
-        safe_page_link("pages/complexo_obstetricia_neonatologia.py",
-                       label="Obstetrícia e Neonatologia",
-                       icon="🤰")
-        safe_page_link("pages/complexo_neuro.py",
-                       label="Neurologia/Neurocirurgia",
-                       icon="🧠")
-        safe_page_link("pages/complexo_nefrologia_trs.py",
-                       label="Nefrologia e TRS",
-                       icon="🧪")
-        safe_page_link("pages/complexo_queimados.py",
-                       label="Queimados",
-                       icon="🔥")
-        safe_page_link("pages/complexo_transplantes.py",
-                       label="Transplantes",
-                       icon="🫀")
-        safe_page_link("pages/complexo_saude_mental.py",
-                       label="Saúde Mental Especializada",
-                       icon="🧩")
-        safe_page_link("pages/complexo_reabilitacao.py",
-                       label="Reabilitação",
-                       icon="🦾")
-        safe_page_link("pages/complexo_urg_emerg.py",
-                       label="Urgência e Emergência",
-                       icon="🚑")
 
-with st.sidebar:
-    st.markdown("<hr/>", unsafe_allow_html=True)
-    st.subheader("Conecte-se")
-    st.markdown("""
-- 💼 [LinkedIn](https://www.linkedin.com/in/gregorio-healthdata/)
-- ▶️ [YouTube](https://www.youtube.com/@Patients2Python)
-- 📸 [Instagram](https://www.instagram.com/patients2python/)
-- 🌐 [Site](https://patients2python.com.br/)
-- 🐙 [GitHub](https://github.com/gregrodrigues22)
-- 👥💬 [Comunidade](https://chat.whatsapp.com/CBn0GBRQie5B8aKppPigdd)
-- 🤝💬 [WhatsApp](https://patients2python.sprinthub.site/r/whatsapp-olz)
-- 🎓 [Escola](https://app.patients2python.com.br/browse)
-    """, unsafe_allow_html=True)
+aba = custom_tabs(["📌 Introdução", "▶️ Tutorial", "📐 Metodologia"], cor="rgb(0,161,178)")
 
 # =========================
-# Leitura de CSV (upload)
+# Helpers de CSV (mantidos)
 # =========================
 @st.cache_data(show_spinner=False)
 def _read_csv_smart(file, force_sep: str | None = None, dtype_map: dict | None = None) -> pd.DataFrame:
@@ -131,61 +140,46 @@ def _read_csv_smart(file, force_sep: str | None = None, dtype_map: dict | None =
     - force_sep: se informado, usa explicitamente (ex.: ';').
     - dtype_map: map de dtypes, ex.: {'id_pessoa':'string'}
     """
+    import io as _io
+
     dtype_map = dtype_map or {}
     if force_sep:
         return pd.read_csv(file, sep=force_sep, dtype=dtype_map)
     head = file.getvalue().splitlines()[0].decode("utf-8", errors="ignore")
     guess = ";" if head.count(";") > head.count(",") else ","
-    return pd.read_csv(io.BytesIO(file.getvalue()), sep=guess, dtype=dtype_map)
+    return pd.read_csv(_io.BytesIO(file.getvalue()), sep=guess, dtype=dtype_map)
+
 
 def schema_df(df: pd.DataFrame) -> pd.DataFrame:
-    return pd.DataFrame({
-        "coluna": df.columns,
-        "dtype": [str(t) for t in df.dtypes],
-        "n_null": [df[c].isna().sum() for c in df.columns],
-        "exemplo": [df[c].dropna().iloc[0] if df[c].notna().any() else None for c in df.columns],
-    })
+    return pd.DataFrame(
+        {
+            "coluna": df.columns,
+            "dtype": [str(t) for t in df.dtypes],
+            "n_null": [df[c].isna().sum() for c in df.columns],
+            "exemplo": [df[c].dropna().iloc[0] if df[c].notna().any() else None for c in df.columns],
+        }
+    )
 
-# =========================
-# Área principal (Landing)
-# =========================
-
-st.subheader("🧭 Sobre este painel")
-st.write(
-    """
-Este painel organiza a visão por **Complexos Produtivos em Saúde**, ajudando a enxergar
-serviços especializados como partes de cadeias de valor clínico-assistenciais.
-
-Use os cards abaixo para explorar cada complexo produtivo — por exemplo, 
-**Oncologia**, **Cardiovascular**, **Ortopedia/Trauma**, **Urgência/Emergência** e outros.
-Em cada um deles, você pode conectar serviços, habilitações, procedimentos e indicadores.
-"""
-)
-
-# ---- componente de card com CTA ----
+# =========================================================
+# Definição dos complexos (usado na aba Introdução)
+# =========================================================
 def card(title: str, desc: str, icon: str, page_path: str):
     with st.container(border=True):
         st.markdown(f"### {icon} {title}")
         st.caption(desc)
 
-        page_file = (APP_DIR / page_path)
+        page_file = APP_DIR / page_path
+        if page_file.exists():
+            st.page_link(page_path, label=f"Explorar {title}", icon=icon)
+        else:
+            st.button(
+                f"Explorar {title}",
+                icon=icon,
+                disabled=True,
+                help="Página ainda não disponível para este complexo (em construção).",
+            )
 
-        # usamos SEMPRE st.button para manter o mesmo estilo visual
-        clicked = st.button(
-            f"Explorar {title}",
-            icon=icon,
-            key=f"btn_{page_path}",
-            use_container_width=False,
-        )
 
-        if clicked:
-            if page_file.exists():
-                # navega para a página do complexo produtivo
-                st.switch_page(page_path)
-            else:
-                st.warning("Página ainda não disponível para este complexo (em construção).")
-
-# ---- definição dos complexos produtivos ----
 complexos = [
     {
         "title": "Oncologia",
@@ -255,20 +249,51 @@ complexos = [
     },
 ]
 
-# ---- layout dos cards em grade ----
-cols = st.columns(3)
-for i, comp in enumerate(complexos):
-    col = cols[i % 3]
-    with col:
-        card(
-            title=comp["title"],
-            desc=comp["desc"],
-            icon=comp["icon"],
-            page_path=comp["page"],
-        )
+# =========================================================
+# Conteúdo das abas
+# =========================================================
+if aba == "📌 Introdução":
+    st.subheader("🧭 Sobre este painel")
+    st.write(
+        """
+Este painel organiza a visão por **Complexos Produtivos em Saúde**, ajudando a enxergar
+serviços especializados como partes de cadeias de valor clínico-assistenciais.
 
-st.divider()
-st.info(
-    "Dica: use o menu lateral para navegar diretamente para um complexo produtivo específico. "
-    "Cada complexo pode ter filtros, mapas de serviços e matrizes de indicadores próprios."
-)
+Use os cards abaixo para explorar cada complexo produtivo — por exemplo, 
+**Oncologia**, **Cardiovascular**, **Ortopedia/Trauma**, **Urgência/Emergência** e outros.
+Em cada um deles, você pode conectar serviços, habilitações, procedimentos e indicadores.
+"""
+    )
+
+    cols = st.columns(3)
+    for i, comp in enumerate(complexos):
+        col = cols[i % 3]
+        with col:
+            card(
+                title=comp["title"],
+                desc=comp["desc"],
+                icon=comp["icon"],
+                page_path=comp["page"],
+            )
+
+    st.divider()
+    st.info(
+        "Dica: você também pode usar o menu lateral para navegar diretamente para um complexo produtivo específico."
+    )
+
+elif aba == "▶️ Tutorial":
+    st.subheader("▶️ Tutorial em vídeo")
+
+    # Substitua pela URL real do seu vídeo:
+    YOUTUBE_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_AQUI"
+
+    st.markdown(
+        """
+Este vídeo mostra, passo a passo, como navegar pelos complexos produtivos,
+usar os filtros e interpretar os principais elementos do painel.
+        """
+    )
+    st.video(YOUTUBE_URL)
+
+elif aba == "📐 Metodologia":
+    st.subheader("📐 Metodologia")
