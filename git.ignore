@@ -19,3 +19,7 @@ venv/
 # Sistema
 .DS_Store
 Thumbs.db
+
+key.json
+*.json
+.credentials/
