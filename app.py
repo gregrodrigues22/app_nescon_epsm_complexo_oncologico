@@ -57,7 +57,7 @@ def safe_page_link(path: str, label: str, icon: str | None = None):
 # ---------------- Sidebar (único) ----------------
 with st.sidebar:
     if LOGO:
-        st.image(str(LOGO), use_container_width=True)
+        st.image(str(LOGO), use_column_width=True)
 
     st.markdown("<hr style='border:none;border-top:1px solid #ccc;'/>", unsafe_allow_html=True)
     st.subheader("Conecte-se")
