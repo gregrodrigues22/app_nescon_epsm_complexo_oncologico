@@ -999,43 +999,42 @@ elif aba == "🗂️ Serviços":
         st.caption("Use os agrupadores abaixo para refinar o cadastro.")
 
         with st.expander("Fitros de Período", expanded=False):
-            comp_sel = st.multiselect("Competência", _opts_srv("competencia"), key="srv_comp")
+            comp_sel = st.multiselect("Competência", _opts_srv("competencia"), key="srv_comp",placeholder="(Todos. Filtros opcionais)")
 
         with st.expander("Fitros de Território", expanded=False):
-            reg_sel       = st.multiselect("Região",           _opts_srv("no_regiao"),         key="srv_reg")
-            uf_sel        = st.multiselect("UF",               _opts_srv("no_uf"),             key="srv_uf")
-            meso_sel      = st.multiselect("Mesorregião",      _opts_srv("no_mesorregiao"),    key="srv_meso")
-            micro_sel     = st.multiselect("Microrregião",     _opts_srv("no_microrregiao"),   key="srv_micro")
-            reg_saude_sel = st.multiselect("Região de Saúde",  _opts_srv("cod_regiao_saude"),  key="srv_regsaude")
-            mun_sel       = st.multiselect("Município",        _opts_srv("municipio"),         key="srv_mun")
-            ivs_sel       = st.multiselect("Município IVS",    _opts_srv("ivs"),               key="srv_ivs")
+            reg_sel       = st.multiselect("Região",           _opts_srv("no_regiao"),         key="srv_reg",placeholder="(Todos. Filtros opcionais)")
+            uf_sel        = st.multiselect("UF",               _opts_srv("no_uf"),             key="srv_uf",placeholder="(Todos. Filtros opcionais)")
+            meso_sel      = st.multiselect("Mesorregião",      _opts_srv("no_mesorregiao"),    key="srv_meso",placeholder="(Todos. Filtros opcionais)")
+            micro_sel     = st.multiselect("Microrregião",     _opts_srv("no_microrregiao"),   key="srv_micro",placeholder="(Todos. Filtros opcionais)")
+            reg_saude_sel = st.multiselect("Região de Saúde",  _opts_srv("cod_regiao_saude"),  key="srv_regsaude",placeholder="(Todos. Filtros opcionais)")
+            mun_sel       = st.multiselect("Município",        _opts_srv("municipio"),         key="srv_mun",placeholder="(Todos. Filtros opcionais)")
+            ivs_sel       = st.multiselect("Município IVS",    _opts_srv("ivs"),               key="srv_ivs",placeholder="(Todos. Filtros opcionais)")
 
         with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
-            tipo_sel     = st.multiselect("Tipo",              _opts_srv("tipo_novo_do_estabelecimento"), key="srv_tipo")
-            subtipo_sel  = st.multiselect("Subtipo",           _opts_srv("subtipo_do_estabelecimento"),   key="srv_subtipo")
-            gestao_sel   = st.multiselect("Gestão",            _opts_srv("gestao"),                        key="srv_gestao")
-            convenio_sel = st.multiselect("Convênio SUS",      _opts_srv("convenio_sus"),                  key="srv_convenio")
-            natureza_sel = st.multiselect("Natureza Jurídica", _opts_srv("categoria_natureza_juridica"),   key="srv_natjur")
-            status_sel   = st.multiselect("Status",            _opts_srv("status_do_estabelecimento"),     key="srv_status")
+            tipo_sel     = st.multiselect("Tipo",              _opts_srv("tipo_novo_do_estabelecimento"), key="srv_tipo",placeholder="(Todos. Filtros opcionais)")
+            subtipo_sel  = st.multiselect("Subtipo",           _opts_srv("subtipo_do_estabelecimento"),   key="srv_subtipo",placeholder="(Todos. Filtros opcionais)")
+            gestao_sel   = st.multiselect("Gestão",            _opts_srv("gestao"),                        key="srv_gestao",placeholder="(Todos. Filtros opcionais)")
+            convenio_sel = st.multiselect("Convênio SUS",      _opts_srv("convenio_sus"),                  key="srv_convenio",placeholder="(Todos. Filtros opcionais)")
+            natureza_sel = st.multiselect("Natureza Jurídica", _opts_srv("categoria_natureza_juridica"),   key="srv_natjur",placeholder="(Todos. Filtros opcionais)")
+            status_sel   = st.multiselect("Status",            _opts_srv("status_do_estabelecimento"),     key="srv_status",placeholder="(Todos. Filtros opcionais)")
 
         with st.expander("Fitros de Habilitações Oncológicas", expanded=False):
             def bool_multiselect(label, key):
                 return st.multiselect(label, ["Sim", "Não"], key=key)
-
-            onco_cacon_sel   = bool_multiselect("CACON",           "srv_onco_cacon")
-            onco_unacon_sel  = bool_multiselect("UNACON",          "srv_onco_unacon")
-            onco_radio_sel   = bool_multiselect("Radioterapia",    "srv_onco_radio")
-            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "srv_onco_quimio")
-            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "srv_onco_cir")
+            onco_cacon_sel = st.multiselect("CACON", ["Sim","Não"], key="srv_onco_cacon", placeholder="(Todos. Filtros opcionais)",)
+            onco_unacon_sel = st.multiselect("UNACON", ["Sim","Não"], key="srv_onco_unacon", placeholder="(Todos. Filtros opcionais)",)
+            onco_radio_sel = st.multiselect("Radioterapia", ["Sim","Não"], key="srv_onco_radio", placeholder="(Todos. Filtros opcionais)",)
+            onco_quimio_sel = st.multiselect("Quimioterapia", ["Sim","Não"], key="srv_onco_quimio", placeholder="(Todos. Filtros opcionais)",)
+            hab_onco_cir_sel = st.multiselect("Onco Cirúrgica", ["Sim","Não"], key="srv_onco_cir", placeholder="(Todos. Filtros opcionais)",)
 
         with st.expander("Fitros de  Serviços especializados", expanded=False):
-            servico_sel       = st.multiselect("Serviço especializado", _opts_srv("servico"),                    key="srv_servico")
-            servico_class_sel = st.multiselect("Classificação",          _opts_srv("servico_classificacao"),     key="srv_servico_class")
-            amb_sus_sel       = st.multiselect("Ambulatorial SUS",       _opts_srv("servico_ambulatorial_sus"),  key="srv_amb_sus")
-            amb_nao_sus_sel   = st.multiselect("Ambulatorial não SUS",   _opts_srv("servico_ambulatorial_nao_sus"), key="srv_amb_nao_sus")
-            hosp_sus_sel      = st.multiselect("Hospitalar SUS",         _opts_srv("servico_hospitalar_sus"),    key="srv_hosp_sus")
-            hosp_nao_sus_sel  = st.multiselect("Hospitalar não SUS",     _opts_srv("servico_hospitalar_nao_sus"), key="srv_hosp_nao_sus")
-            terceiro_sel      = st.multiselect("Terceiro",               _opts_srv("servico_terceiro"),          key="srv_terceiro")
+            servico_sel       = st.multiselect("Serviço especializado", _opts_srv("servico"),                    key="srv_servico",placeholder="(Todos. Filtros opcionais)")
+            servico_class_sel = st.multiselect("Classificação",          _opts_srv("servico_classificacao"),     key="srv_servico_class",placeholder="(Todos. Filtros opcionais)")
+            amb_sus_sel       = st.multiselect("Ambulatorial SUS",       _opts_srv("servico_ambulatorial_sus"),  key="srv_amb_sus",placeholder="(Todos. Filtros opcionais)")
+            amb_nao_sus_sel   = st.multiselect("Ambulatorial não SUS",   _opts_srv("servico_ambulatorial_nao_sus"), key="srv_amb_nao_sus",placeholder="(Todos. Filtros opcionais)")
+            hosp_sus_sel      = st.multiselect("Hospitalar SUS",         _opts_srv("servico_hospitalar_sus"),    key="srv_hosp_sus",placeholder="(Todos. Filtros opcionais)")
+            hosp_nao_sus_sel  = st.multiselect("Hospitalar não SUS",     _opts_srv("servico_hospitalar_nao_sus"), key="srv_hosp_nao_sus",placeholder="(Todos. Filtros opcionais)")
+            terceiro_sel      = st.multiselect("Terceiro",               _opts_srv("servico_terceiro"),          key="srv_terceiro",placeholder="(Todos. Filtros opcionais)")
 
     # =========================================================
     # Aplicação dos filtros
@@ -1215,3 +1214,462 @@ elif aba == "🗂️ Serviços":
         )
     else:
         st.info("Não existem colunas suficientes para montar a tabela.")
+
+# =====================================================================
+# 4) Cadastro Habilitações
+# =====================================================================
+elif aba == "✅ Habilitação":
+    st.subheader("✅ Habilitação")
+
+    # ---------------------------------------------------------
+    # Carregar dados
+    # ---------------------------------------------------------
+    with st.spinner("⏳ Carregando base de habilitações..."):
+        df_hab = load_table(TABLES["habilitacao"]).copy()
+
+    # Helper local para opções dos filtros
+    def _opts_hab(col: str):
+        if col not in df_hab:
+            return []
+        return sorted(df_hab[col].dropna().unique())
+
+    # =========================================================
+    # SIDEBAR DE FILTROS
+    # =========================================================
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Habilitações")
+        st.caption("Use os agrupadores abaixo para refinar o cadastro de habilitações.")
+
+        # ------------------ Período -------------------------
+        with st.expander("Filtros de Período", expanded=False):
+            ano_hab_sel = st.multiselect(
+                "Ano da habilitação",
+                _opts_hab("habilitacao_ano"),
+                key="hab_ano",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_hab_sel = st.multiselect(
+                "Mês da habilitação",
+                _opts_hab("habilitacao_mes"),
+                key="hab_mes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+            ano_comp_ini_sel = st.multiselect(
+                "Ano competência inicial",
+                _opts_hab("habilitacao_ano_competencia_inicial"),
+                key="hab_ano_comp_ini",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_comp_ini_sel = st.multiselect(
+                "Mês competência inicial",
+                _opts_hab("habilitacao_mes_competencia_inicial"),
+                key="hab_mes_comp_ini",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+            ano_comp_fim_sel = st.multiselect(
+                "Ano competência final",
+                _opts_hab("habilitacao_ano_competencia_final"),
+                key="hab_ano_comp_fim",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_comp_fim_sel = st.multiselect(
+                "Mês competência final",
+                _opts_hab("habilitacao_mes_competencia_final"),
+                key="hab_mes_comp_fim",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+            ano_portaria_sel = st.multiselect(
+                "Ano da portaria",
+                _opts_hab("habilitacao_ano_portaria"),
+                key="hab_ano_portaria",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_portaria_sel = st.multiselect(
+                "Mês da portaria",
+                _opts_hab("habilitacao_mes_portaria"),
+                key="hab_mes_portaria",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ------------------ Território ----------------------- #Faltou Região Brasil
+        with st.expander("Filtros de Território", expanded=False):
+            uf_sel = st.multiselect(
+                "UF",
+                _opts_hab("ibge_no_uf"),
+                key="hab_uf",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            reg_saude_sel = st.multiselect(
+                "Região de Saúde",
+                _opts_hab("ibge_no_regiao_saude"),
+                key="hab_reg_saude",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            meso_sel = st.multiselect(
+                "Mesorregião",
+                _opts_hab("ibge_no_mesorregiao"),
+                key="hab_meso",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            micro_sel = st.multiselect(
+                "Microrregião",
+                _opts_hab("ibge_no_microrregiao"),
+                key="hab_micro",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mun_sel = st.multiselect(
+                "Município",
+                _opts_hab("ibge_no_municipio"),
+                key="hab_mun",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            ivs_sel = st.multiselect(
+                "Município IVS",
+                _opts_hab("ibge_ivs"),
+                key="hab_ivs",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # -------- Perfil do Estabelecimento ------------------
+        with st.expander("Filtros de Perfil do Estabelecimento", expanded=False):
+            tipo_novo_sel = st.multiselect(
+                "Tipo",
+                _opts_hab("estabelecimentos_tipo_novo_do_estabelecimento"),
+                key="hab_tipo_novo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            subtipo_sel = st.multiselect(
+                "Subtipo",
+                _opts_hab("estabelecimentos_subtipo_do_estabelecimento"),
+                key="hab_subtipo",
+            )
+            gestao_sel = st.multiselect(
+                "Gestão",
+                _opts_hab("estabelecimentos_gestao"),
+                key="hab_gestao",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            convenio_sel = st.multiselect(
+                "Convênio SUS",
+                _opts_hab("estabelecimentos_convenio_sus"),
+                key="hab_convenio",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            nat_jur_sel = st.multiselect(
+                "Natureza jurídica",
+                _opts_hab("estabelecimentos_categoria_natureza_juridica"),
+                key="hab_natjur",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            status_sel = st.multiselect(
+                "Status",
+                _opts_hab("estabelecimentos_status_do_estabelecimento"),
+                key="hab_status",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ------------- Filtros de Habilitação ----------------
+        with st.expander("Filtros de Habilitação", expanded=False):
+            nivel_tipo_sel = st.multiselect(
+                "Nível/Tipo de habilitação",
+                _opts_hab("habilitacao_nivel_habilitacao_tipo"),
+                key="hab_nivel_tipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            cat_hab_sel = st.multiselect(
+                "Categoria da habilitação",
+                _opts_hab("referencia_habilitacao_no_categoria"),
+                key="hab_categoria",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            no_hab_sel = st.multiselect(
+                "Descrição da habilitação",
+                _opts_hab("referencia_habilitacao_no_habilitacao"),
+                key="hab_nome_hab",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tag_hab_sel = st.multiselect(
+                "Tag (agrupador)",
+                _opts_hab("referencia_habilitacao_ds_tag"),
+                key="hab_tag",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+    # =========================================================
+    # Aplicação dos filtros
+    # =========================================================
+    dfh = df_hab.copy()
+
+    def apply_multisel(df, col, sel):
+        if sel and col in df:
+            return df[df[col].isin(sel)]
+        return df
+
+    # Período
+    dfh = apply_multisel(dfh, "habilitacao_ano",                        ano_hab_sel)
+    dfh = apply_multisel(dfh, "habilitacao_mes",                        mes_hab_sel)
+    dfh = apply_multisel(dfh, "habilitacao_ano_competencia_inicial",    ano_comp_ini_sel)
+    dfh = apply_multisel(dfh, "habilitacao_mes_competencia_inicial",    mes_comp_ini_sel)
+    dfh = apply_multisel(dfh, "habilitacao_ano_competencia_final",      ano_comp_fim_sel)
+    dfh = apply_multisel(dfh, "habilitacao_mes_competencia_final",      mes_comp_fim_sel)
+    dfh = apply_multisel(dfh, "habilitacao_ano_portaria",               ano_portaria_sel)
+    dfh = apply_multisel(dfh, "habilitacao_mes_portaria",               mes_portaria_sel)
+
+    # Território
+    dfh = apply_multisel(dfh, "ibge_no_uf",             uf_sel)
+    dfh = apply_multisel(dfh, "ibge_no_regiao_saude",   reg_saude_sel)
+    dfh = apply_multisel(dfh, "ibge_no_mesorregiao",    meso_sel)
+    dfh = apply_multisel(dfh, "ibge_no_microrregiao",   micro_sel)
+    dfh = apply_multisel(dfh, "ibge_no_municipio",      mun_sel)
+    dfh = apply_multisel(dfh, "ibge_ivs",               ivs_sel)
+
+    # Perfil do estabelecimento
+    dfh = apply_multisel(dfh, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
+    dfh = apply_multisel(dfh, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
+    dfh = apply_multisel(dfh, "estabelecimentos_gestao",                       gestao_sel)
+    dfh = apply_multisel(dfh, "estabelecimentos_convenio_sus",                 convenio_sel)
+    dfh = apply_multisel(dfh, "estabelecimentos_categoria_natureza_juridica",  nat_jur_sel)
+    dfh = apply_multisel(dfh, "estabelecimentos_status_do_estabelecimento",    status_sel)
+
+    # Habilitação
+    dfh = apply_multisel(dfh, "habilitacao_nivel_habilitacao_tipo",    nivel_tipo_sel)
+    dfh = apply_multisel(dfh, "referencia_habilitacao_no_categoria",   cat_hab_sel)
+    dfh = apply_multisel(dfh, "referencia_habilitacao_no_habilitacao", no_hab_sel)
+    dfh = apply_multisel(dfh, "referencia_habilitacao_ds_tag",         tag_hab_sel)
+
+    # Se depois dos filtros não sobrar nada, aborta o resto
+    if dfh.empty:
+        st.warning("Nenhuma habilitação encontrada com os filtros selecionados.")
+        st.stop()
+
+    # =========================================================
+    # METRIC CARDS
+    # =========================================================
+    st.info("📏 Grandes números: visão rápida das habilitações com os filtros aplicados")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    # 1) Total de habilitações (linhas da base filtrada)
+    with col1:
+        total_hab = dfh.shape[0]
+        st.metric("Total de habilitações", fmt_num(total_hab))
+
+    # 2) Média de habilitações por UF
+    with col2:
+        if "ibge_no_uf" in dfh.columns:
+            # usa qualquer coluna não nula (pode ser a própria habilitação)
+            mean_uf = dfh.groupby("ibge_no_uf")["referencia_habilitacao_no_habilitacao"].count().mean() \
+                if "referencia_habilitacao_no_habilitacao" in dfh.columns else \
+                dfh.groupby("ibge_no_uf").size().mean()
+            st.metric("Média de habilitações por UF", fmt_num(mean_uf))
+        else:
+            st.metric("Média de habilitações por UF", "-")
+
+    # 3) Média de habilitações por Região de Saúde
+    with col3:
+        if "ibge_no_regiao_saude" in dfh.columns:
+            mean_regsaude = dfh.groupby("ibge_no_regiao_saude")["referencia_habilitacao_no_habilitacao"].count().mean() \
+                if "referencia_habilitacao_no_habilitacao" in dfh.columns else \
+                dfh.groupby("ibge_no_regiao_saude").size().mean()
+            st.metric("Média por Região de Saúde", fmt_num(mean_regsaude))
+        else:
+            st.metric("Média por Região de Saúde", "-")
+
+    # 4) Média de habilitações por estabelecimento
+    with col4:
+        if "habilitacao_id_estabelecimento_cnes" in dfh.columns:
+            mean_estab = dfh.groupby("habilitacao_id_estabelecimento_cnes")["referencia_habilitacao_no_habilitacao"].count().mean() \
+                if "referencia_habilitacao_no_habilitacao" in dfh.columns else \
+                dfh.groupby("habilitacao_id_estabelecimento_cnes").size().mean()
+            st.metric("Média por Estabelecimento", fmt_num(mean_estab))
+        else:
+            st.metric("Média por Estabelecimento", "-")
+
+    # =========================================================
+    # Habilitações ativas vs encerradas – usando 9999 e comparação com data atual
+    # =========================================================
+
+    # Garantir números
+    for col in [
+        "habilitacao_ano_competencia_final",
+        "habilitacao_mes_competencia_final",
+    ]:
+        if col in dfh.columns:
+            dfh[col] = pd.to_numeric(dfh[col], errors="coerce")
+
+    ano_final = dfh["habilitacao_ano_competencia_final"]
+    mes_final = dfh["habilitacao_mes_competencia_final"]
+
+    # Data atual
+    hoje = pd.Timestamp.today()
+    comp_atual = hoje.year * 100 + hoje.month
+
+    # Calcular competência final
+    comp_final = ano_final * 100 + mes_final
+
+    # Lógica:
+    # 1) ano_final = 9999 e mes_final = 9999 → ATIVA
+    ativa_mask = (ano_final == 9999) & (mes_final == 9999)
+
+    # 2) senão → comparar com hoje
+    ativa_mask |= (comp_final >= comp_atual)
+
+    # Encerradas = tudo que não é ativo
+    encerrada_mask = ~ativa_mask
+
+    total_ativas = ativa_mask.sum()
+    total_encerradas = encerrada_mask.sum()
+    total_validas = total_ativas + total_encerradas
+
+    perc_enc = (total_encerradas / total_validas * 100) if total_validas > 0 else 0
+    perc_ati = (total_ativas / total_validas * 100) if total_validas > 0 else 0
+
+    colA, colB, colC, colD = st.columns(4)
+
+    with colA:
+        st.metric("Habilitações Ativas", fmt_num(total_ativas))
+
+    with colB:
+        st.metric("Habilitações Encerradas", fmt_num(total_encerradas))
+
+    with colC:
+        st.metric("% Encerradas", f"{perc_enc:.1f}%")
+
+    with colD:
+        st.metric("% Ativas", f"{perc_ati:.1f}%")
+
+    # ============================================================
+    # 📊 GRÁFICOS – Habilitações
+    # ============================================================
+    st.info("📊 Gráficos — resumo visual das habilitações filtradas")
+
+    # Helper para limitar categorias (top N + 'Outros')
+    def col_top_n(df, col, top_n=40, outros_label="Outros"):
+        if col not in df.columns:
+            return df
+        vc = df[col].value_counts(dropna=False)
+        if len(vc) <= top_n:
+            return df
+        top_vals = set(vc.head(top_n).index)
+        df2 = df.copy()
+        df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
+        return df2
+
+    # ------------------------------------------------------------
+    # 1) Distribuição por Categoria de Habilitação
+    # ------------------------------------------------------------
+    with st.expander("Habilitações por categoria (CNES)", expanded=True):
+        col_cat = "referencia_habilitacao_no_categoria"
+        if col_cat in dfh.columns:
+            df_cat = col_top_n(dfh, col_cat, top_n=25)
+            fig_cat = pareto_barh(
+                df_cat,
+                col_cat,
+                None,
+                "Distribuição de habilitações por categoria",
+                "Qtde de habilitações",
+            )
+            st.plotly_chart(fig_cat, use_container_width=True)
+        else:
+            st.info("Coluna de categoria de habilitação não encontrada na base.")
+
+    # ------------------------------------------------------------
+    # 3) Habilitações por UF
+    # ------------------------------------------------------------
+    with st.expander("Habilitações por UF", expanded=True):
+        if "ibge_no_uf" in dfh.columns:
+            df_uf = (
+                dfh.groupby("ibge_no_uf")
+                .size()
+                .reset_index(name="qtd_habilitacoes")
+                .sort_values("qtd_habilitacoes", ascending=False)
+            )
+
+            fig_uf = bar_total_por_grupo(
+                df_uf,
+                grupo_col="ibge_no_uf",
+                valor_col="qtd_habilitacoes",
+                titulo="Quantidade de habilitações por UF",
+                x_label="UF",
+                y_label="Qtde de habilitações",
+                orientation="v",
+            )
+            st.plotly_chart(fig_uf, use_container_width=True)
+        else:
+            st.info("Coluna `ibge_no_uf` não encontrada.")
+
+    # ============================================================
+    # 📋 TABELA DESCRITIVA — Habilitações (com limite de linhas)
+    # ============================================================
+    st.info("📋 Tabela descritiva das habilitações filtradas")
+
+    cols_desc = [
+        "habilitacao_ano",
+        "habilitacao_mes",
+        "habilitacao_tipo_habilitacao",
+        "referencia_habilitacao_no_categoria",
+        "referencia_habilitacao_no_habilitacao",
+        "referencia_habilitacao_ds_tag",
+        "habilitacao_ano_competencia_inicial",
+        "habilitacao_mes_competencia_inicial",
+        "habilitacao_ano_competencia_final",
+        "habilitacao_mes_competencia_final",
+        "habilitacao_portaria",
+        "habilitacao_data_portaria",
+        "habilitacao_quantidade_leitos",
+        "habilitacao_id_estabelecimento_cnes",
+        "estabelecimentos_nome_fantasia",
+        "estabelecimentos_tipo_novo_do_estabelecimento",
+        "estabelecimentos_subtipo_do_estabelecimento",
+        "estabelecimentos_gestao",
+        "estabelecimentos_status_do_estabelecimento",
+        "estabelecimentos_convenio_sus",
+        "estabelecimentos_categoria_natureza_juridica",
+        "ibge_no_municipio",
+        "ibge_no_regiao_saude",
+        "ibge_no_microrregiao",
+        "ibge_no_mesorregiao",
+        "ibge_no_uf",
+        "ibge_ivs",
+    ]
+
+    cols_ok = [c for c in cols_desc if c in dfh.columns]
+
+    if cols_ok:
+        # ---- Limite de linhas exibidas na tela ----
+        max_rows_display = 5000  # ajuste se quiser
+        n_total = dfh.shape[0]
+
+        if n_total > max_rows_display:
+            st.warning(
+                f"A base filtrada possui {fmt_num(n_total)} linhas. "
+                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                "Use o botão de download para obter o conjunto completo."
+            )
+        else:
+            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+
+        df_display = dfh[cols_ok].head(max_rows_display)
+
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            height=500,
+        )
+
+        # ---- Download CSV com TODAS as linhas filtradas ----
+        csv = dfh[cols_ok].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Baixar CSV das habilitações filtradas (completo)",
+            data=csv,
+            file_name="habilitacoes_filtradas.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    else:
+        st.warning("Não existem colunas suficientes para montar a tabela de habilitações.")

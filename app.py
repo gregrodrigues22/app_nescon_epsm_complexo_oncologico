@@ -285,7 +285,7 @@ elif aba == "▶️ Tutorial":
     st.subheader("▶️ Tutorial em vídeo")
 
     # Substitua pela URL real do seu vídeo:
-    YOUTUBE_URL = "https://www.youtube.com/watch?v=SEU_VIDEO_AQUI"
+    YOUTUBE_URL = "https://youtu.be/gaWaKHC9Yb4"
 
     st.markdown(
         """
@@ -297,3 +297,45 @@ usar os filtros e interpretar os principais elementos do painel.
 
 elif aba == "📐 Metodologia":
     st.subheader("📐 Metodologia")
+
+    st.markdown(
+        """
+        ### **Metodologia dos Complexos Produtivos em Saúde**
+
+        Este painel utiliza uma metodologia desenvolvida pelo NESCON/UFMG e pela Estação de Pesquisa
+        de Sinais de Mercado (EPSM) para organizar serviços especializados dentro de **Complexos Produtivos
+        em Saúde (CPS)**.
+
+        A análise integra informações estruturais do CNES — como habilitações, serviços especializados, leitos,
+        equipamentos e profissionais — com dados assistenciais do SIH/SUS e SIA/SUS, além de informações
+        territoriais do IBGE.
+
+        Cada complexo produtivo (como Oncologia, Cardiovascular, Obstetrícia & Neonatologia, Neurologia &
+        Neurocirurgia, Urgência & Emergência, entre outros) é identificado a partir de **critérios técnicos
+        específicos**, que incluem:
+
+        - presença de serviços especializados essenciais;  
+        - habilitações obrigatórias do CNES;  
+        - equipamentos críticos;  
+        - disponibilidade de equipe qualificada;  
+        - estrutura mínima compatível com o nível de complexidade do complexo.
+
+        A partir dessa classificação, o painel gera indicadores que ajudam a compreender a **distribuição
+        territorial da capacidade instalada**, identificar **lacunas assistenciais** e apoiar o
+        **planejamento da rede de atenção**.
+
+        A metodologia completa pode ser baixada no link abaixo:
+        """
+    )
+
+    # ============ PDF PARA DOWNLOAD ============
+    pdf_path = "assets/arquivo_metodologia.pdf"  # coloque o caminho correto do seu PDF
+
+    with open(pdf_path, "rb") as pdf_file:
+        st.download_button(
+            label="📄 Baixar metodologia completa (PDF)",
+            data=pdf_file,
+            file_name="metodologia_complexos_produtivos.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
