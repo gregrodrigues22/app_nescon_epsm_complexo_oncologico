@@ -8,7 +8,7 @@ from pathlib import Path
 
 # Gráficos reutilizáveis
 from src.graph import pareto_barh, bar_count
-from src.graph import pie_standard
+from src.graph import pie_standard, bar_yoy_trend
 from src.graph import bar_total_por_grupo
 
 # ==============================================================
@@ -591,7 +591,7 @@ tabs_labels = [
     "✅ Habilitação",
     "🛏️ Leitos",
     "🧰 Equipamentos",
-    "🧑 Profissionais",
+    "👩‍⚕️ Profissionais",
     "📋 Registros"
 ]
 
@@ -1559,9 +1559,44 @@ elif aba == "✅ Habilitação":
         df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
         return df2
 
-    # ------------------------------------------------------------
-    # 1) Distribuição por Categoria de Habilitação
-    # ------------------------------------------------------------
+    with st.expander("Evolução anual do número de habilitações", expanded=True):
+
+        col_ano = "habilitacao_ano"
+
+        if col_ano in dfh.columns and dfh[col_ano].notna().any():
+            # Garante numérico
+            dfh[col_ano] = pd.to_numeric(dfh[col_ano], errors="coerce")
+
+            # Agrupa por ano e conta habilitações
+            df_ano = (
+                dfh.dropna(subset=[col_ano])
+                   .groupby(col_ano)
+                   .size()
+                   .reset_index(name="qtd_habilitacoes")
+                   .sort_values(col_ano)
+            )
+
+            if not df_ano.empty:
+                fig_ano = bar_yoy_trend(
+                    df=df_ano,
+                    x=col_ano,
+                    y="qtd_habilitacoes",
+                    title="Evolução anual do número de habilitações",
+                    x_is_year=True,
+                    fill_missing_years=True,
+                    show_ma=True,
+                    ma_window=3,
+                    show_mean=True,
+                    show_trend=True,
+                    legend_pos="bottom",
+                    y_label="Quantidade de habilitações",
+                )
+                st.plotly_chart(fig_ano, use_container_width=True)
+            else:
+                st.info("Não há dados suficientes para montar a série anual.")
+        else:
+            st.info("A coluna `habilitacao_ano` não está disponível ou está vazia na base filtrada.")
+            
     with st.expander("Habilitações por categoria (CNES)", expanded=True):
         col_cat = "referencia_habilitacao_no_categoria"
         if col_cat in dfh.columns:
@@ -1577,9 +1612,35 @@ elif aba == "✅ Habilitação":
         else:
             st.info("Coluna de categoria de habilitação não encontrada na base.")
 
-    # ------------------------------------------------------------
-    # 3) Habilitações por UF
-    # ------------------------------------------------------------
+    with st.expander("Distribuição por Tipo de Habilitação (Pizza)", expanded=True):
+
+        col_tipo = "habilitacao_nivel_habilitacao_tipo"
+
+        if col_tipo in dfh.columns and dfh[col_tipo].notna().any():
+
+            # Cria coluna de contagem (=1) para usar como 'values'
+            df_pie = dfh[[col_tipo]].copy()
+            df_pie["_n"] = 1
+
+            try:
+                fig_pie = pie_standard(
+                    df=df_pie,
+                    names=col_tipo,
+                    values="_n",
+                    title="Distribuição de Habilitações por Tipo",
+                    top_n=12,                 # mantém só os 12 mais frequentes + 'Outros'
+                    others_label="Outros",
+                    hole=0.35,                # donut
+                    legend_pos="below_title",
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Erro ao gerar o gráfico: {e}")
+
+        else:
+            st.info("A coluna `habilitacao_tipo_habilitacao` não está disponível na base ou está vazia.")
+            
     with st.expander("Habilitações por UF", expanded=True):
         if "ibge_no_uf" in dfh.columns:
             df_uf = (
@@ -1597,6 +1658,7 @@ elif aba == "✅ Habilitação":
                 x_label="UF",
                 y_label="Qtde de habilitações",
                 orientation="v",
+                top_n = 10
             )
             st.plotly_chart(fig_uf, use_container_width=True)
         else:
@@ -1664,12 +1726,1358 @@ elif aba == "✅ Habilitação":
         # ---- Download CSV com TODAS as linhas filtradas ----
         csv = dfh[cols_ok].to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="📥 Baixar CSV das habilitações filtradas (completo)",
-            data=csv,
-            file_name="habilitacoes_filtradas.csv",
-            mime="text/csv",
-            use_container_width=True,
+            "📥 Baixar CSV",                 # mesmo label
+            csv,                            # dados
+            "habilitacoes_filtradas.csv",   # nome do arquivo
+            "text/csv",                     # mime type
         )
 
     else:
         st.warning("Não existem colunas suficientes para montar a tabela de habilitações.")
+
+# =====================================================================
+# 4) Cadastro Leitos
+# =====================================================================
+elif aba == "🛏️ Leitos":
+    st.subheader("🛏️ Leitos")
+
+    # ---------------------------------------------------------
+    # Carregar dados
+    # ---------------------------------------------------------
+    with st.spinner("⏳ Carregando base de leitos..."):
+        df_lei = load_table(TABLES["leitos"]).copy()
+
+    # Helper local para opções dos filtros
+    def _opts_lei(col: str):
+        if col not in df_lei:
+            return []
+        return sorted(df_lei[col].dropna().unique())
+
+    # =========================================================
+    # SIDEBAR DE FILTROS
+    # =========================================================
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Leitos hospitalares")
+        st.caption("Use os agrupadores abaixo para refinar o cadastro de leitos.")
+
+        # ----------------- Período --------------------
+        with st.expander("Fitros de Período", expanded=False):
+            ano_sel = st.multiselect(
+                "Ano",
+                _opts_lei("leitos_ano"),
+                key="lei_ano",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_sel = st.multiselect(
+                "Mês",
+                _opts_lei("leitos_mes"),
+                key="lei_mes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ----------------- Território ------------------
+        with st.expander("Fitros de Território", expanded=False):
+            uf_sel = st.multiselect(
+                "UF",
+                _opts_lei("ibge_no_uf"),
+                key="lei_uf",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            reg_saude_sel = st.multiselect(
+                "Região de Saúde",
+                _opts_lei("ibge_no_regiao_saude"),
+                key="lei_regsaude",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            meso_sel = st.multiselect(
+                "Mesorregião",
+                _opts_lei("ibge_no_mesorregiao"),
+                key="lei_meso",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            micro_sel = st.multiselect(
+                "Microrregião",
+                _opts_lei("ibge_no_microrregiao"),
+                key="lei_micro",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mun_sel = st.multiselect(
+                "Município",
+                _opts_lei("ibge_no_municipio"),
+                key="lei_mun",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            ivs_sel = st.multiselect(
+                "Município IVS",
+                _opts_lei("ibge_ivs"),
+                key="lei_ivs",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # --------- Perfil do Estabelecimento ----------
+        with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
+            tipo_novo_sel = st.multiselect(
+                "Tipo (novo)",
+                _opts_lei("estabelecimentos_tipo_novo_do_estabelecimento"),
+                key="lei_tipo_novo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_sel = st.multiselect(
+                "Tipo do estabelecimento",
+                _opts_lei("estabelecimentos_tipo_do_estabelecimento"),
+                key="lei_tipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            subtipo_sel = st.multiselect(
+                "Subtipo",
+                _opts_lei("estabelecimentos_subtipo_do_estabelecimento"),
+                key="lei_subtipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            gestao_sel = st.multiselect(
+                "Gestão",
+                _opts_lei("estabelecimentos_gestao"),
+                key="lei_gestao",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            convenio_sel = st.multiselect(
+                "Convênio SUS",
+                _opts_lei("estabelecimentos_convenio_sus"),
+                key="lei_convenio",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            natureza_sel = st.multiselect(
+                "Natureza Jurídica",
+                _opts_lei("estabelecimentos_categoria_natureza_juridica"),
+                key="lei_natjur",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            status_sel = st.multiselect(
+                "Status",
+                _opts_lei("estabelecimentos_status_do_estabelecimento"),
+                key="lei_status",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ------------- Complexos / Oncologia -----------
+        with st.expander("Fitros de Complexos / Oncologia", expanded=False):
+            def bool_multiselect(label, key):
+                return st.multiselect(
+                    label, ["Sim", "Não"], key=key,
+                    placeholder="(Todos. Filtros opcionais)",
+                )
+
+            onco_cacon_sel   = bool_multiselect("CACON",           "lei_onco_cacon")
+            onco_unacon_sel  = bool_multiselect("UNACON",          "lei_onco_unacon")
+            onco_radio_sel   = bool_multiselect("Radioterapia",    "lei_onco_radio")
+            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "lei_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "lei_onco_cir")
+
+            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "lei_uti_adulto")
+            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "lei_uti_ped")
+            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "lei_uti_neo")
+            uti_cor_sel      = bool_multiselect("UTI Coronariana", "lei_uti_cor")
+            ucin_sel         = bool_multiselect("UCIN",            "lei_ucin")
+            uti_queim_sel    = bool_multiselect("UTI Queimados",   "lei_uti_queim")
+            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "lei_caps_psiq")
+            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "lei_rehab_cer")
+            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "lei_cardio_ac")
+            nutricao_sel     = bool_multiselect("Nutrição",              "lei_nutricao")
+            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "lei_odonto_ceo")
+
+        # ----------------- Tipos de Leito -----------------
+        with st.expander("Fitros de Tipos de Leito", expanded=False):
+            esp_sel = st.multiselect(
+                "Especialidade do leito",
+                _opts_lei("leitos_tipo_especialidade_leito"),
+                key="lei_esp",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_leito_sel = st.multiselect(
+                "Tipo de leito (código)",
+                _opts_lei("leitos_tipo_leito"),
+                key="lei_tipo_leito",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_nome_sel = st.multiselect(
+                "Tipo de leito (nome)",
+                _opts_lei("leitos_tipo_leito_nome"),
+                key="lei_tipo_nome",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            ref_no_leito_sel = st.multiselect(
+                "Descrição CNES do leito",
+                _opts_lei("referencia_especialidade_no_leito"),
+                key="lei_no_leito",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+    # =========================================================
+    # Aplicação dos filtros
+    # =========================================================
+    dfl = df_lei.copy()
+
+    def apply_multisel(df, col, sel):
+        if sel and col in df:
+            return df[df[col].isin(sel)]
+        return df
+
+    # Período / território
+    dfl = apply_multisel(dfl, "leitos_ano",           ano_sel)
+    dfl = apply_multisel(dfl, "leitos_mes",           mes_sel)
+    dfl = apply_multisel(dfl, "ibge_no_uf",           uf_sel)
+    dfl = apply_multisel(dfl, "ibge_no_regiao_saude", reg_saude_sel)
+    dfl = apply_multisel(dfl, "ibge_no_mesorregiao",  meso_sel)
+    dfl = apply_multisel(dfl, "ibge_no_microrregiao", micro_sel)
+    dfl = apply_multisel(dfl, "ibge_no_municipio",    mun_sel)
+    dfl = apply_multisel(dfl, "ibge_ivs",             ivs_sel)
+
+    # Perfil Estabelecimento
+    dfl = apply_multisel(dfl, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_gestao",                       gestao_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_convenio_sus",                 convenio_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
+    dfl = apply_multisel(dfl, "estabelecimentos_status_do_estabelecimento",    status_sel)
+
+    # Booleanos (Onco / Complexos)
+    def apply_bool(df, col, sel):
+        if not sel or col not in df:
+            return df
+        allowed = []
+        if "Sim" in sel:
+            allowed.append(True)
+        if "Não" in sel:
+            allowed.append(False)
+        return df[df[col].astype("boolean").isin(allowed)]
+
+    dfl = apply_bool(dfl, "onco_cacon",                          onco_cacon_sel)
+    dfl = apply_bool(dfl, "onco_unacon",                         onco_unacon_sel)
+    dfl = apply_bool(dfl, "onco_radioterapia",                   onco_radio_sel)
+    dfl = apply_bool(dfl, "onco_quimioterapia",                  onco_quimio_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
+
+    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_ucin",           ucin_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_nutricao",                nutricao_sel)
+    dfl = apply_bool(dfl, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
+
+    # Tipos de leito
+    dfl = apply_multisel(dfl, "leitos_tipo_especialidade_leito", esp_sel)
+    dfl = apply_multisel(dfl, "leitos_tipo_leito",              tipo_leito_sel)
+    dfl = apply_multisel(dfl, "leitos_tipo_leito_nome",         tipo_nome_sel)
+    dfl = apply_multisel(dfl, "referencia_especialidade_no_leito", ref_no_leito_sel)
+
+    # Se depois dos filtros não sobrar nada, aborta o resto
+    if dfl.empty:
+        st.warning("Nenhum leito encontrado com os filtros selecionados.")
+        st.stop()
+
+    # =========================================================
+    # METRIC CARDS
+    # =========================================================
+    st.info("📏 Grandes números: visão rápida dos leitos filtrados")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        if "leitos_quantidade_total" in dfl.columns:
+            total_leitos = dfl["leitos_quantidade_total"].sum()
+        else:
+            total_leitos = dfl.shape[0]
+        st.metric("Total de leitos (somados)", fmt_num(total_leitos))
+
+    with col2:
+        if "ibge_no_uf" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
+            mean_uf = (
+                dfl.groupby("ibge_no_uf")["leitos_quantidade_total"].sum().mean()
+            )
+            st.metric("Média de leitos por UF", fmt_num(mean_uf))
+        else:
+            st.metric("Média de leitos por UF", "-")
+
+    with col3:
+        if "ibge_no_regiao_saude" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
+            mean_regsaude = (
+                dfl.groupby("ibge_no_regiao_saude")["leitos_quantidade_total"].sum().mean()
+            )
+            st.metric("Média de leitos por Reg. Saúde", fmt_num(mean_regsaude))
+        else:
+            st.metric("Média de leitos por Reg. Saúde", "-")
+
+    with col4:
+        id_estab_col = "leitos_id_estabelecimento_cnes" if "leitos_id_estabelecimento_cnes" in dfl.columns else "cnes"
+        if id_estab_col in dfl.columns and "leitos_quantidade_total" in dfl.columns:
+            mean_estab = (
+                dfl.groupby(id_estab_col)["leitos_quantidade_total"].sum().mean()
+            )
+            st.metric("Média de leitos por Estabelecimento", fmt_num(mean_estab))
+        else:
+            st.metric("Média de leitos por Estabelecimento", "-")
+
+    # =========================================================
+    # Função helper para limitar categorias nos gráficos
+    # =========================================================
+    def col_top_n(df, col, top_n=40, outros_label="Outros"):
+        if col not in df.columns:
+            return df
+        vc = df[col].value_counts(dropna=False)
+        if len(vc) <= top_n:
+            return df
+        top_vals = set(vc.head(top_n).index)
+        df2 = df.copy()
+        df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
+        return df2
+
+    # ============================================================
+    # 📊 GRÁFICOS
+    # ============================================================
+    st.info("📊 Gráficos — resumo visual dos leitos filtrados")
+
+    # 1) Leitos por tipo de leito (nome)
+    with st.expander("Leitos por tipo de leito (nome)", expanded=True):
+        if "leitos_tipo_leito_nome" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
+            df_tipo = (
+                dfl.groupby("leitos_tipo_leito_nome")["leitos_quantidade_total"]
+                   .sum()
+                   .reset_index(name="qtd_leitos")
+            )
+            df_tipo = df_tipo.sort_values("qtd_leitos", ascending=False)
+            df_tipo = col_top_n(df_tipo, "leitos_tipo_leito_nome", top_n=30)
+
+            fig_tipo = bar_total_por_grupo(
+                df_tipo,
+                grupo_col="leitos_tipo_leito_nome",
+                valor_col="qtd_leitos",
+                titulo="Distribuição de leitos por tipo (nome)",
+                x_label="Quantidade de leitos",
+                y_label="Tipo de leito",
+                orientation="h",
+            )
+            st.plotly_chart(fig_tipo, use_container_width=True)
+        else:
+            st.info("Colunas de tipo de leito ou quantidade total não estão disponíveis.")
+
+    # 2) Leitos SUS x Contratado x Total
+    with st.expander("Leitos SUS, contratados e total", expanded=False):
+        cols_leitos = ["leitos_quantidade_sus", "leitos_quantidade_contratado", "leitos_quantidade_total"]
+        presentes = [c for c in cols_leitos if c in dfl.columns]
+
+        if presentes:
+            total_sus   = dfl["leitos_quantidade_sus"].sum() if "leitos_quantidade_sus" in dfl.columns else 0
+            total_cont  = dfl["leitos_quantidade_contratado"].sum() if "leitos_quantidade_contratado" in dfl.columns else 0
+            total_total = dfl["leitos_quantidade_total"].sum() if "leitos_quantidade_total" in dfl.columns else 0
+
+            df_sus = pd.DataFrame({
+                "categoria": ["Leitos SUS", "Leitos contratados", "Leitos totais"],
+                "qtd": [total_sus, total_cont, total_total],
+            })
+
+            fig_sus = bar_total_por_grupo(
+                df_sus,
+                grupo_col="categoria",
+                valor_col="qtd",
+                titulo="Leitos SUS, contratados e total",
+                x_label="Quantidade de leitos",
+                y_label="Categoria",
+                orientation="v",
+            )
+            st.plotly_chart(fig_sus, use_container_width=True)
+        else:
+            st.info("Não há colunas de quantidade de leitos SUS/contratados/total disponíveis.")
+
+    # ============================================================
+    # 📋 TABELA DESCRITIVA — Leitos (com limite de linhas)
+    # ============================================================
+    st.info("📋 Tabela descritiva dos leitos filtrados")
+
+    cols_desc = [
+        "leitos_ano",
+        "leitos_mes",
+        "ibge_no_municipio",
+        "ibge_no_uf",
+        "leitos_tipo_especialidade_leito",
+        "leitos_tipo_leito",
+        "leitos_tipo_leito_nome",
+        "referencia_especialidade_no_leito",
+        "leitos_quantidade_total",
+        "leitos_quantidade_sus",
+        "leitos_quantidade_contratado",
+        "leitos_id_estabelecimento_cnes",
+        "estabelecimentos_nome_fantasia",
+        "estabelecimentos_tipo_novo_do_estabelecimento",
+        "estabelecimentos_subtipo_do_estabelecimento",
+        "estabelecimentos_gestao",
+        "estabelecimentos_status_do_estabelecimento",
+        "estabelecimentos_convenio_sus",
+        "estabelecimentos_categoria_natureza_juridica",
+        "onco_cacon",
+        "onco_unacon",
+        "onco_radioterapia",
+        "onco_quimioterapia",
+    ]
+
+    cols_ok = [c for c in cols_desc if c in dfl.columns]
+
+    if cols_ok:
+        max_rows_display = 5000
+        n_total = dfl.shape[0]
+
+        if n_total > max_rows_display:
+            st.warning(
+                f"A base filtrada possui {fmt_num(n_total)} linhas. "
+                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                "Use o botão de download para obter o conjunto completo."
+            )
+        else:
+            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+
+        df_display = dfl[cols_ok].head(max_rows_display)
+
+        st.dataframe(df_display, use_container_width=True, height=500)
+
+        csv = dfl[cols_ok].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Baixar CSV",
+            csv,
+            "leitos_filtrados.csv",
+            "text/csv",
+        )
+    else:
+        st.info("Não existem colunas suficientes para montar a tabela de leitos.")
+
+# =====================================================================
+# X) Cadastro Equipamentos
+# =====================================================================
+elif aba == "🧰 Equipamentos":
+    st.subheader("🧰 Equipamentos")
+
+    # ---------------------------------------------------------
+    # Carregar dados
+    # ---------------------------------------------------------
+    with st.spinner("⏳ Carregando base de equipamentos..."):
+        df_eqp = load_table(TABLES["equipamentos"]).copy()
+
+    # Helper local para opções dos filtros
+    def _opts_eqp(col: str):
+        if col not in df_eqp:
+            return []
+        return sorted(df_eqp[col].dropna().unique())
+
+    # =========================================================
+    # SIDEBAR DE FILTROS
+    # =========================================================
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Equipamentos")
+        st.caption("Use os agrupadores abaixo para refinar o cadastro de equipamentos.")
+
+        # ----------------- Período --------------------
+        with st.expander("Fitros de Período", expanded=False):
+            ano_sel = st.multiselect(
+                "Ano",
+                _opts_eqp("equipamentos_ano"),
+                key="eqp_ano",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_sel = st.multiselect(
+                "Mês",
+                _opts_eqp("equipamentos_mes"),
+                key="eqp_mes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ----------------- Território ------------------
+        with st.expander("Fitros de Território", expanded=False):
+            uf_sel = st.multiselect(
+                "UF",
+                _opts_eqp("ibge_no_uf"),
+                key="eqp_uf",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            reg_saude_sel = st.multiselect(
+                "Região de Saúde",
+                _opts_eqp("ibge_no_regiao_saude"),
+                key="eqp_regsaude",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            meso_sel = st.multiselect(
+                "Mesorregião",
+                _opts_eqp("ibge_no_mesorregiao"),
+                key="eqp_meso",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            micro_sel = st.multiselect(
+                "Microrregião",
+                _opts_eqp("ibge_no_microrregiao"),
+                key="eqp_micro",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mun_sel = st.multiselect(
+                "Município",
+                _opts_eqp("ibge_no_municipio"),
+                key="eqp_mun",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            ivs_sel = st.multiselect(
+                "Município IVS",
+                _opts_eqp("ibge_ivs"),
+                key="eqp_ivs",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # --------- Perfil do Estabelecimento ----------
+        with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
+            tipo_novo_sel = st.multiselect(
+                "Tipo (novo)",
+                _opts_eqp("estabelecimentos_tipo_novo_do_estabelecimento"),
+                key="eqp_tipo_novo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_sel = st.multiselect(
+                "Tipo do estabelecimento",
+                _opts_eqp("estabelecimentos_tipo_do_estabelecimento"),
+                key="eqp_tipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            subtipo_sel = st.multiselect(
+                "Subtipo",
+                _opts_eqp("estabelecimentos_subtipo_do_estabelecimento"),
+                key="eqp_subtipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            gestao_sel = st.multiselect(
+                "Gestão",
+                _opts_eqp("estabelecimentos_gestao"),
+                key="eqp_gestao",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            convenio_sel = st.multiselect(
+                "Convênio SUS",
+                _opts_eqp("estabelecimentos_convenio_sus"),
+                key="eqp_convenio",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            natureza_sel = st.multiselect(
+                "Natureza Jurídica",
+                _opts_eqp("estabelecimentos_categoria_natureza_juridica"),
+                key="eqp_natjur",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            status_sel = st.multiselect(
+                "Status",
+                _opts_eqp("estabelecimentos_status_do_estabelecimento"),
+                key="eqp_status",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ------------- Complexos / Oncologia -----------
+        with st.expander("Fitros de Complexos / Oncologia", expanded=False):
+            def bool_multiselect(label, key):
+                return st.multiselect(
+                    label, ["Sim", "Não"], key=key,
+                    placeholder="(Todos. Filtros opcionais)",
+                )
+
+            onco_cacon_sel   = bool_multiselect("CACON",           "eqp_onco_cacon")
+            onco_unacon_sel  = bool_multiselect("UNACON",          "eqp_onco_unacon")
+            onco_radio_sel   = bool_multiselect("Radioterapia",    "eqp_onco_radio")
+            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "eqp_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "eqp_onco_cir")
+
+            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "eqp_uti_adulto")
+            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "eqp_uti_ped")
+            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "eqp_uti_neo")
+            uti_cor_sel      = bool_multiselect("UTI Coronariana", "eqp_uti_cor")
+            ucin_sel         = bool_multiselect("UCIN",            "eqp_ucin")
+            uti_queim_sel    = bool_multiselect("UTI Queimados",   "eqp_uti_queim")
+            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "eqp_caps_psiq")
+            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "eqp_rehab_cer")
+            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "eqp_cardio_ac")
+            nutricao_sel     = bool_multiselect("Nutrição",              "eqp_nutricao")
+            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "eqp_odonto_ceo")
+
+        # ----------------- Tipos de Equipamento -----------------
+        with st.expander("Fitros de Tipos de Equipamento", expanded=False):
+            tipo_eqp_sel = st.multiselect(
+                "Tipo de equipamento",
+                _opts_eqp("equipamentos_tipo_equipamento"),
+                key="eqp_tipo_equipamento",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            id_eqp_sel = st.multiselect(
+                "Código do equipamento",
+                _opts_eqp("equipamentos_id_equipamento"),
+                key="eqp_id_equipamento",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+    # =========================================================
+    # Aplicação dos filtros
+    # =========================================================
+    dfe = df_eqp.copy()
+
+    def apply_multisel(df, col, sel):
+        if sel and col in df:
+            return df[df[col].isin(sel)]
+        return df
+
+    # Período / território
+    dfe = apply_multisel(dfe, "equipamentos_ano", ano_sel)
+    dfe = apply_multisel(dfe, "equipamentos_mes", mes_sel)
+    dfe = apply_multisel(dfe, "ibge_no_uf",       uf_sel)
+    dfe = apply_multisel(dfe, "ibge_no_regiao_saude", reg_saude_sel)
+    dfe = apply_multisel(dfe, "ibge_no_mesorregiao",  meso_sel)
+    dfe = apply_multisel(dfe, "ibge_no_microrregiao", micro_sel)
+    dfe = apply_multisel(dfe, "ibge_no_municipio",    mun_sel)
+    dfe = apply_multisel(dfe, "ibge_ivs",             ivs_sel)
+
+    # Perfil Estabelecimento
+    dfe = apply_multisel(dfe, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_gestao",                       gestao_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_convenio_sus",                 convenio_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
+    dfe = apply_multisel(dfe, "estabelecimentos_status_do_estabelecimento",    status_sel)
+
+    # Booleanos (Onco / Complexos)
+    def apply_bool(df, col, sel):
+        if not sel or col not in df:
+            return df
+        allowed = []
+        if "Sim" in sel:
+            allowed.append(True)
+        if "Não" in sel:
+            allowed.append(False)
+        return df[df[col].astype("boolean").isin(allowed)]
+
+    dfe = apply_bool(dfe, "onco_cacon",                          onco_cacon_sel)
+    dfe = apply_bool(dfe, "onco_unacon",                         onco_unacon_sel)
+    dfe = apply_bool(dfe, "onco_radioterapia",                   onco_radio_sel)
+    dfe = apply_bool(dfe, "onco_quimioterapia",                  onco_quimio_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
+
+    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_ucin",           ucin_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_nutricao",                nutricao_sel)
+    dfe = apply_bool(dfe, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
+
+    # Tipos de equipamento
+    dfe = apply_multisel(dfe, "equipamentos_tipo_equipamento", tipo_eqp_sel)
+    dfe = apply_multisel(dfe, "equipamentos_id_equipamento",   id_eqp_sel)
+
+    # Se depois dos filtros não sobrar nada, aborta o resto
+    if dfe.empty:
+        st.warning("Nenhum equipamento encontrado com os filtros selecionados.")
+        st.stop()
+
+    # =========================================================
+    # METRIC CARDS
+    # =========================================================
+    st.info("📏 Grandes números: visão rápida dos equipamentos filtrados")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        if "equipamentos_quantidade" in dfe.columns:
+            total_eqp = dfe["equipamentos_quantidade"].sum()
+        else:
+            total_eqp = dfe.shape[0]
+        st.metric("Total de equipamentos (somados)", fmt_num(total_eqp))
+
+    with col2:
+        if "equipamentos_quantidade_ativos" in dfe.columns:
+            total_ativos = dfe["equipamentos_quantidade_ativos"].sum()
+            st.metric("Equipamentos ativos (somados)", fmt_num(total_ativos))
+        else:
+            st.metric("Equipamentos ativos (somados)", "-")
+
+    with col3:
+        if "ibge_no_uf" in dfe.columns and "equipamentos_quantidade" in dfe.columns:
+            mean_uf = (
+                dfe.groupby("ibge_no_uf")["equipamentos_quantidade"].sum().mean()
+            )
+            st.metric("Média de equipamentos por UF", fmt_num(mean_uf))
+        else:
+            st.metric("Média de equipamentos por UF", "-")
+
+    with col4:
+        id_estab_col = "equipamentos_id_estabelecimento_cnes" if "equipamentos_id_estabelecimento_cnes" in dfe.columns else "cnes"
+        if id_estab_col in dfe.columns and "equipamentos_quantidade" in dfe.columns:
+            mean_estab = (
+                dfe.groupby(id_estab_col)["equipamentos_quantidade"].sum().mean()
+            )
+            st.metric("Média de equipamentos por Estabelecimento", fmt_num(mean_estab))
+        else:
+            st.metric("Média de equipamentos por Estabelecimento", "-")
+
+    # =========================================================
+    # Função helper para limitar categorias nos gráficos
+    # =========================================================
+    def col_top_n(df, col, top_n=40, outros_label="Outros"):
+        if col not in df.columns:
+            return df
+        vc = df[col].value_counts(dropna=False)
+        if len(vc) <= top_n:
+            return df
+        top_vals = set(vc.head(top_n).index)
+        df2 = df.copy()
+        df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
+        return df2
+
+    # ============================================================
+    # 📊 GRÁFICOS
+    # ============================================================
+    st.info("📊 Gráficos — resumo visual dos equipamentos filtrados")
+
+    # 1) Equipamentos por tipo
+    with st.expander("Equipamentos por tipo", expanded=True):
+        if "equipamentos_tipo_equipamento" in dfe.columns and "equipamentos_quantidade" in dfe.columns:
+            df_tipo = (
+                dfe.groupby("equipamentos_tipo_equipamento")["equipamentos_quantidade"]
+                   .sum()
+                   .reset_index(name="qtd_equipamentos")
+            )
+            df_tipo = df_tipo.sort_values("qtd_equipamentos", ascending=False)
+            df_tipo = col_top_n(df_tipo, "equipamentos_tipo_equipamento", top_n=30)
+
+            fig_tipo = bar_total_por_grupo(
+                df_tipo,
+                grupo_col="equipamentos_tipo_equipamento",
+                valor_col="qtd_equipamentos",
+                titulo="Distribuição de equipamentos por tipo",
+                x_label="Quantidade de equipamentos",
+                y_label="Tipo de equipamento",
+                orientation="h",
+            )
+            st.plotly_chart(fig_tipo, use_container_width=True)
+        else:
+            st.info("Colunas de tipo de equipamento ou quantidade não estão disponíveis.")
+
+    # 2) Equipamentos disponíveis x indisponíveis SUS
+    with st.expander("Equipamentos disponíveis x indisponíveis para o SUS", expanded=False):
+        if (
+            "equipamentos_indicador_disponivel_sus" in dfe.columns
+            or "equipamentos_indicador_indisponivel_sus" in dfe.columns
+        ):
+            # Considera qualquer valor > 0 como "marcado"
+            disp_mask  = dfe.get("equipamentos_indicador_disponivel_sus", 0)    > 0
+            indisp_mask = dfe.get("equipamentos_indicador_indisponivel_sus", 0) > 0
+
+            # Soma quantidade de equipamentos em cada grupo
+            total_disp  = dfe.loc[disp_mask,  "equipamentos_quantidade"].sum() if "equipamentos_quantidade" in dfe.columns else disp_mask.sum()
+            total_indisp = dfe.loc[indisp_mask,"equipamentos_quantidade"].sum() if "equipamentos_quantidade" in dfe.columns else indisp_mask.sum()
+
+            df_sus = pd.DataFrame({
+                "categoria": ["Disponíveis SUS", "Indisponíveis SUS"],
+                "qtd": [total_disp, total_indisp],
+            })
+
+            fig_sus = bar_total_por_grupo(
+                df_sus,
+                grupo_col="categoria",
+                valor_col="qtd",
+                titulo="Equipamentos disponíveis x indisponíveis para o SUS",
+                x_label="Quantidade de equipamentos",
+                y_label="Categoria",
+                orientation="v",
+            )
+            st.plotly_chart(fig_sus, use_container_width=True)
+        else:
+            st.info("Não há colunas de indicador de disponibilidade SUS na base.")
+
+    # ============================================================
+    # 📋 TABELA DESCRITIVA — Equipamentos (com limite de linhas)
+    # ============================================================
+    st.info("📋 Tabela descritiva dos equipamentos filtrados")
+
+    cols_desc = [
+        "equipamentos_ano",
+        "equipamentos_mes",
+        "ibge_no_municipio",
+        "ibge_no_uf",
+        "equipamentos_id_equipamento",
+        "equipamentos_tipo_equipamento",
+        "equipamentos_quantidade",
+        "equipamentos_quantidade_ativos",
+        "equipamentos_indicador_disponivel_sus",
+        "equipamentos_indicador_indisponivel_sus",
+        "equipamentos_id_estabelecimento_cnes",
+        "estabelecimentos_nome_fantasia",
+        "estabelecimentos_tipo_novo_do_estabelecimento",
+        "estabelecimentos_subtipo_do_estabelecimento",
+        "estabelecimentos_gestao",
+        "estabelecimentos_status_do_estabelecimento",
+        "estabelecimentos_convenio_sus",
+        "estabelecimentos_categoria_natureza_juridica",
+        "onco_cacon",
+        "onco_unacon",
+        "onco_radioterapia",
+        "onco_quimioterapia",
+    ]
+
+    cols_ok = [c for c in cols_desc if c in dfe.columns]
+
+    if cols_ok:
+        max_rows_display = 5000
+        n_total = dfe.shape[0]
+
+        if n_total > max_rows_display:
+            st.warning(
+                f"A base filtrada possui {fmt_num(n_total)} linhas. "
+                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                "Use o botão de download para obter o conjunto completo."
+            )
+        else:
+            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+
+        df_display = dfe[cols_ok].head(max_rows_display)
+
+        st.dataframe(df_display, use_container_width=True, height=500)
+
+        csv = dfe[cols_ok].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Baixar CSV",
+            csv,
+            "equipamentos_filtrados.csv",
+            "text/csv",
+        )
+    else:
+        st.info("Não existem colunas suficientes para montar a tabela de equipamentos.")
+
+# =====================================================================
+# X) Cadastro Profissionais
+# =====================================================================
+elif aba == "👩‍⚕️ Profissionais":
+    st.subheader("👩‍⚕️ Profissionais")
+
+    # ---------------------------------------------------------
+    # Carregar dados
+    # ---------------------------------------------------------
+    with st.spinner("⏳ Carregando base de profissionais..."):
+        df_prof = load_table(TABLES["profissionais"]).copy()
+
+    # Helper local para opções dos filtros
+    def _opts_prof(col: str):
+        if col not in df_prof:
+            return []
+        return sorted(df_prof[col].dropna().unique())
+
+    # =========================================================
+    # SIDEBAR DE FILTROS
+    # =========================================================
+    with st.sidebar:
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.subheader("Filtros — Profissionais de saúde")
+        st.caption("Use os agrupadores abaixo para refinar a visão dos profissionais.")
+
+        # ----------------- Período --------------------
+        with st.expander("Fitros de Período", expanded=False):
+            ano_sel = st.multiselect(
+                "Ano",
+                _opts_prof("profissionais_ano"),
+                key="prof_ano",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mes_sel = st.multiselect(
+                "Mês",
+                _opts_prof("profissionais_mes"),
+                key="prof_mes",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # ----------------- Território ------------------
+        with st.expander("Fitros de Território", expanded=False):
+            uf_sel = st.multiselect(
+                "UF",
+                _opts_prof("ibge_no_uf"),
+                key="prof_uf",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            reg_saude_sel = st.multiselect(
+                "Região de Saúde",
+                _opts_prof("ibge_no_regiao_saude"),
+                key="prof_regsaude",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            meso_sel = st.multiselect(
+                "Mesorregião",
+                _opts_prof("ibge_no_mesorregiao"),
+                key="prof_meso",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            micro_sel = st.multiselect(
+                "Microrregião",
+                _opts_prof("ibge_no_microrregiao"),
+                key="prof_micro",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            mun_sel = st.multiselect(
+                "Município",
+                _opts_prof("ibge_no_municipio"),
+                key="prof_mun",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            ivs_sel = st.multiselect(
+                "Município IVS",
+                _opts_prof("ibge_ivs"),
+                key="prof_ivs",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # --------- Perfil do Estabelecimento ----------
+        with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
+            tipo_novo_sel = st.multiselect(
+                "Tipo (novo)",
+                _opts_prof("estabelecimentos_tipo_novo_do_estabelecimento"),
+                key="prof_tipo_novo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_sel = st.multiselect(
+                "Tipo do estabelecimento",
+                _opts_prof("estabelecimentos_tipo_do_estabelecimento"),
+                key="prof_tipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            subtipo_sel = st.multiselect(
+                "Subtipo",
+                _opts_prof("estabelecimentos_subtipo_do_estabelecimento"),
+                key="prof_subtipo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            gestao_sel = st.multiselect(
+                "Gestão",
+                _opts_prof("estabelecimentos_gestao"),
+                key="prof_gestao",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            convenio_sel = st.multiselect(
+                "Convênio SUS",
+                _opts_prof("estabelecimentos_convenio_sus"),
+                key="prof_convenio",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            natureza_sel = st.multiselect(
+                "Natureza Jurídica",
+                _opts_prof("estabelecimentos_categoria_natureza_juridica"),
+                key="prof_natjur",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            status_sel = st.multiselect(
+                "Status",
+                _opts_prof("estabelecimentos_status_do_estabelecimento"),
+                key="prof_status",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # --------- Perfil Profissional ----------
+        with st.expander("Filtros de Perfil Profissional", expanded=False):
+            cbo_sel = st.multiselect(
+                "Ocupação (CBO descrição)",
+                _opts_prof("cbo_descricao"),
+                key="prof_cbo_desc",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            cbo_saude_sel = st.multiselect(
+                "CBO Saúde",
+                _opts_prof("cbo_saude"),
+                key="prof_cbo_saude",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_cbo_sel = st.multiselect(
+                "Tipo de CBO",
+                _opts_prof("profissionais_tipo_cbo"),
+                key="prof_tipo_cbo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_ras_sel = st.multiselect(
+                "Tipo RAS",
+                _opts_prof("profissionais_tipo_ras"),
+                key="prof_tipo_ras",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_esp_sel = st.multiselect(
+                "Tipo de especialidade",
+                _opts_prof("profissionais_tipo_especialidade"),
+                key="prof_tipo_esp",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            tipo_grupo_sel = st.multiselect(
+                "Tipo de grupo",
+                _opts_prof("profissionais_tipo_grupo"),
+                key="prof_tipo_grupo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            cons_tipo_sel = st.multiselect(
+                "Tipo de conselho",
+                _opts_prof("profissionais_tipo_conselho"),
+                key="prof_tipo_conselho",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+            vinculo_tipo_sel = st.multiselect(
+                "Tipo de vínculo",
+                _opts_prof("profissionais_tipo_vinculo"),
+                key="prof_tipo_vinculo",
+                placeholder="(Todos. Filtros opcionais)",
+            )
+
+        # --------- Vínculo / SUS ----------
+        with st.expander("Filtros de Vínculo / SUS", expanded=False):
+            def ind_multiselect(label, key):
+                return st.multiselect(
+                    label, ["Sim", "Não"], key=key,
+                    placeholder="(Todos. Filtros opcionais)",
+                )
+
+            ind_terceiro_sel = ind_multiselect("Estabelecimento terceiro", "prof_terceiro")
+            ind_contrat_sus_sel = ind_multiselect("Vínculo contratado SUS", "prof_contrat_sus")
+            ind_autonomo_sus_sel = ind_multiselect("Vínculo autônomo SUS", "prof_autonomo_sus")
+            ind_outros_sel = ind_multiselect("Vínculo outros", "prof_vinc_outros")
+            ind_atende_sus_sel = ind_multiselect("Atende SUS", "prof_atende_sus")
+            ind_atende_nao_sus_sel = ind_multiselect("Atende não SUS", "prof_atende_nao_sus")
+
+        # ------------- Complexos / Oncologia -----------
+        with st.expander("Filtros de Complexos / Oncologia", expanded=False):
+            def bool_multiselect(label, key):
+                return st.multiselect(
+                    label, ["Sim", "Não"], key=key,
+                    placeholder="(Todos. Filtros opcionais)",
+                )
+
+            onco_cacon_sel   = bool_multiselect("CACON",           "prof_onco_cacon")
+            onco_unacon_sel  = bool_multiselect("UNACON",          "prof_onco_unacon")
+            onco_radio_sel   = bool_multiselect("Radioterapia",    "prof_onco_radio")
+            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "prof_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "prof_onco_cir")
+
+            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "prof_uti_adulto")
+            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "prof_uti_ped")
+            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "prof_uti_neo")
+            uti_cor_sel      = bool_multiselect("UTI Coronariana", "prof_uti_cor")
+            ucin_sel         = bool_multiselect("UCIN",            "prof_ucin")
+            uti_queim_sel    = bool_multiselect("UTI Queimados",   "prof_uti_queim")
+            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "prof_caps_psiq")
+            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "prof_rehab_cer")
+            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "prof_cardio_ac")
+            nutricao_sel     = bool_multiselect("Nutrição",              "prof_nutricao")
+            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "prof_odonto_ceo")
+
+    # =========================================================
+    # Aplicação dos filtros
+    # =========================================================
+    dfp = df_prof.copy()
+
+    def apply_multisel(df, col, sel):
+        if sel and col in df:
+            return df[df[col].isin(sel)]
+        return df
+
+    # Inteiros 1/0 -> booleanos "Sim/Não"
+    def apply_indicator(df, col, sel):
+        if not sel or col not in df:
+            return df
+        bool_series = df[col].fillna(0).astype(int) > 0
+        allowed = []
+        if "Sim" in sel:
+            allowed.append(True)
+        if "Não" in sel:
+            allowed.append(False)
+        mask = bool_series.isin(allowed)
+        return df[mask]
+
+    # Booleanos puros
+    def apply_bool(df, col, sel):
+        if not sel or col not in df:
+            return df
+        allowed = []
+        if "Sim" in sel:
+            allowed.append(True)
+        if "Não" in sel:
+            allowed.append(False)
+        return df[df[col].astype("boolean").isin(allowed)]
+
+    # Período / território
+    dfp = apply_multisel(dfp, "profissionais_ano", ano_sel)
+    dfp = apply_multisel(dfp, "profissionais_mes", mes_sel)
+    dfp = apply_multisel(dfp, "ibge_no_uf",        uf_sel)
+    dfp = apply_multisel(dfp, "ibge_no_regiao_saude", reg_saude_sel)
+    dfp = apply_multisel(dfp, "ibge_no_mesorregiao",  meso_sel)
+    dfp = apply_multisel(dfp, "ibge_no_microrregiao", micro_sel)
+    dfp = apply_multisel(dfp, "ibge_no_municipio",    mun_sel)
+    dfp = apply_multisel(dfp, "ibge_ivs",             ivs_sel)
+
+    # Perfil Estabelecimento
+    dfp = apply_multisel(dfp, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_gestao",                       gestao_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_convenio_sus",                 convenio_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
+    dfp = apply_multisel(dfp, "estabelecimentos_status_do_estabelecimento",    status_sel)
+
+    # Perfil Profissional
+    dfp = apply_multisel(dfp, "cbo_descricao",                cbo_sel)
+    dfp = apply_multisel(dfp, "cbo_saude",                    cbo_saude_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_cbo",       tipo_cbo_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_ras",       tipo_ras_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_especialidade", tipo_esp_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_grupo",     tipo_grupo_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_conselho",  cons_tipo_sel)
+    dfp = apply_multisel(dfp, "profissionais_tipo_vinculo",   vinculo_tipo_sel)
+
+    # Indicadores de vínculo / SUS (inteiros)
+    dfp = apply_indicator(dfp, "profissionais_indicador_estabelecimento_terceiro",      ind_terceiro_sel)
+    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_contratado_sus",        ind_contrat_sus_sel)
+    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_autonomo_sus",          ind_autonomo_sus_sel)
+    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_outros",                ind_outros_sel)
+    dfp = apply_indicator(dfp, "profissionais_indicador_atende_sus",                    ind_atende_sus_sel)
+    dfp = apply_indicator(dfp, "profissionais_indicador_atende_nao_sus",                ind_atende_nao_sus_sel)
+
+    # Complexos / Onco
+    dfp = apply_bool(dfp, "onco_cacon",                          onco_cacon_sel)
+    dfp = apply_bool(dfp, "onco_unacon",                         onco_unacon_sel)
+    dfp = apply_bool(dfp, "onco_radioterapia",                   onco_radio_sel)
+    dfp = apply_bool(dfp, "onco_quimioterapia",                  onco_quimio_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
+
+    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_ucin",           ucin_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_nutricao",                nutricao_sel)
+    dfp = apply_bool(dfp, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
+
+    # Se depois dos filtros não sobrar nada, aborta o resto
+    if dfp.empty:
+        st.warning("Nenhum profissional encontrado com os filtros selecionados.")
+        st.stop()
+
+    # =========================================================
+    # METRIC CARDS
+    # =========================================================
+    st.info("📏 Grandes números: visão rápida dos profissionais filtrados")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        total_vinc = dfp.shape[0]
+        st.metric("Total de vínculos de profissionais", fmt_num(total_vinc))
+
+    with col2:
+        # Profissionais distintos por CNS ou registro conselho
+        if "profissionais_cartao_nacional_saude" in dfp.columns:
+            n_prof = dfp["profissionais_cartao_nacional_saude"].nunique()
+        elif "profissionais_id_registro_conselho" in dfp.columns:
+            n_prof = dfp["profissionais_id_registro_conselho"].nunique()
+        else:
+            n_prof = dfp.shape[0]
+        st.metric("Profissionais distintos (aprox.)", fmt_num(n_prof))
+
+    with col3:
+        carga_cols = [
+            c for c in [
+                "profissionais_carga_horaria_outros",
+                "profissionais_carga_horaria_hospitalar",
+                "profissionais_carga_horaria_ambulatorial",
+            ] if c in dfp.columns
+        ]
+        if carga_cols:
+            carga_total = dfp[carga_cols].sum(axis=1).sum()
+            st.metric("Carga horária total (somada)", fmt_num(carga_total))
+        else:
+            st.metric("Carga horária total (somada)", "-")
+
+    with col4:
+        if carga_cols and total_vinc > 0:
+            carga_media = carga_total / total_vinc
+            st.metric("Carga horária média por vínculo", f"{carga_media:,.1f}".replace(",", "."))
+        else:
+            st.metric("Carga horária média por vínculo", "-")
+
+    # =========================================================
+    # Função helper para limitar categorias nos gráficos
+    # =========================================================
+    def col_top_n(df, col, top_n=40, outros_label="Outros"):
+        if col not in df.columns:
+            return df
+        vc = df[col].value_counts(dropna=False)
+        if len(vc) <= top_n:
+            return df
+        top_vals = set(vc.head(top_n).index)
+        df2 = df.copy()
+        df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
+        return df2
+
+    # ============================================================
+    # 📊 GRÁFICOS
+    # ============================================================
+    st.info("📊 Gráficos — resumo visual dos profissionais filtrados")
+
+    # 1) Profissionais por CBO (descrição)
+    with st.expander("Profissionais por ocupação (CBO descrição)", expanded=True):
+        if "cbo_descricao" in dfp.columns:
+            df_cbo = (
+                dfp.groupby("cbo_descricao")
+                   .size()
+                   .reset_index(name="qtd_profissionais")
+            )
+            df_cbo = df_cbo.sort_values("qtd_profissionais", ascending=False)
+            df_cbo = col_top_n(df_cbo, "cbo_descricao", top_n=40)
+
+            fig_cbo = bar_total_por_grupo(
+                df_cbo,
+                grupo_col="cbo_descricao",
+                valor_col="qtd_profissionais",
+                titulo="Distribuição de vínculos por ocupação (CBO)",
+                x_label="Quantidade de vínculos",
+                y_label="Ocupação (CBO)",
+                orientation="h",
+            )
+            st.plotly_chart(fig_cbo, use_container_width=True)
+        else:
+            st.info("Coluna `cbo_descricao` não está disponível na base filtrada.")
+
+    # 2) Profissionais por tipo RAS
+    with st.expander("Distribuição por Tipo RAS", expanded=False):
+        if "profissionais_tipo_ras" in dfp.columns:
+            df_ras = (
+                dfp.groupby("profissionais_tipo_ras")
+                   .size()
+                   .reset_index(name="qtd_profissionais")
+            )
+            df_ras = df_ras.sort_values("qtd_profissionais", ascending=False)
+
+            fig_ras = bar_total_por_grupo(
+                df_ras,
+                grupo_col="profissionais_tipo_ras",
+                valor_col="qtd_profissionais",
+                titulo="Profissionais por tipo RAS",
+                x_label="Quantidade de vínculos",
+                y_label="Tipo RAS",
+                orientation="v",
+            )
+            st.plotly_chart(fig_ras, use_container_width=True)
+        else:
+            st.info("Coluna `profissionais_tipo_ras` não está disponível na base filtrada.")
+
+    # 3) Atende SUS x não SUS
+    with st.expander("Atendimento SUS x não SUS", expanded=False):
+        if "profissionais_indicador_atende_sus" in dfp.columns or "profissionais_indicador_atende_nao_sus" in dfp.columns:
+            sus_mask  = dfp.get("profissionais_indicador_atende_sus", 0).fillna(0).astype(int)       > 0
+            nao_sus_mask = dfp.get("profissionais_indicador_atende_nao_sus", 0).fillna(0).astype(int) > 0
+
+            total_sus     = sus_mask.sum()
+            total_nao_sus = nao_sus_mask.sum()
+
+            df_sus = pd.DataFrame({
+                "categoria": ["Atende SUS", "Atende não SUS"],
+                "qtd": [total_sus, total_nao_sus],
+            })
+
+            fig_sus = bar_total_por_grupo(
+                df_sus,
+                grupo_col="categoria",
+                valor_col="qtd",
+                titulo="Distribuição de vínculos segundo atendimento SUS x não SUS",
+                x_label="Quantidade de vínculos",
+                y_label="Categoria",
+                orientation="v",
+            )
+            st.plotly_chart(fig_sus, use_container_width=True)
+        else:
+            st.info("Colunas de indicador de atendimento SUS/Não SUS não estão disponíveis.")
+
+    # ============================================================
+    # 📋 TABELA DESCRITIVA — Profissionais (c/ limite de linhas)
+    # ============================================================
+    st.info("📋 Tabela descritiva dos profissionais filtrados")
+
+    cols_desc = [
+        "profissionais_ano",
+        "profissionais_mes",
+        "ibge_no_municipio",
+        "ibge_no_uf",
+        "profissionais_nome",
+        "profissionais_tipo_conselho",
+        "profissionais_id_registro_conselho",
+        "profissionais_cartao_nacional_saude",
+        "profissionais_tipo_vinculo",
+        "cbo_ocupacao",
+        "cbo_descricao",
+        "profissionais_tipo_cbo",
+        "profissionais_tipo_ras",
+        "profissionais_tipo_especialidade",
+        "profissionais_tipo_grupo",
+        "profissionais_carga_horaria_outros",
+        "profissionais_carga_horaria_hospitalar",
+        "profissionais_carga_horaria_ambulatorial",
+        "profissionais_indicador_estabelecimento_terceiro",
+        "profissionais_indicador_vinculo_contratado_sus",
+        "profissionais_indicador_vinculo_autonomo_sus",
+        "profissionais_indicador_vinculo_outros",
+        "profissionais_indicador_atende_sus",
+        "profissionais_indicador_atende_nao_sus",
+        "profissionais_id_estabelecimento_cnes",
+        "estabelecimentos_nome_fantasia",
+        "estabelecimentos_tipo_novo_do_estabelecimento",
+        "estabelecimentos_subtipo_do_estabelecimento",
+        "estabelecimentos_gestao",
+        "estabelecimentos_status_do_estabelecimento",
+        "estabelecimentos_convenio_sus",
+        "estabelecimentos_categoria_natureza_juridica",
+        "onco_cacon",
+        "onco_unacon",
+        "onco_radioterapia",
+        "onco_quimioterapia",
+    ]
+
+    cols_ok = [c for c in cols_desc if c in dfp.columns]
+
+    if cols_ok:
+        max_rows_display = 5000
+        n_total = dfp.shape[0]
+
+        if n_total > max_rows_display:
+            st.warning(
+                f"A base filtrada possui {fmt_num(n_total)} linhas. "
+                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                "Use o botão de download para obter o conjunto completo."
+            )
+        else:
+            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+
+        df_display = dfp[cols_ok].head(max_rows_display)
+
+        st.dataframe(df_display, use_container_width=True, height=500)
+
+        csv = dfp[cols_ok].to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Baixar CSV",
+            csv,
+            "profissionais_filtrados.csv",
+            "text/csv",
+        )
+    else:
+        st.info("Não existem colunas suficientes para montar a tabela de profissionais.")
