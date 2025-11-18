@@ -3615,7 +3615,7 @@ elif aba == "🛏️ Leitos":
                 "text/csv",
                 use_container_width=True,
             )
-            
+
 # =====================================================================
 # X) Cadastro Equipamentos
 # =====================================================================
@@ -3623,16 +3623,383 @@ elif aba == "🧰 Equipamentos":
     st.subheader("🧰 Equipamentos")
 
     # ---------------------------------------------------------
-    # Carregar dados
+    # Inicialização: BigQuery + opções de filtros (com spinner)
     # ---------------------------------------------------------
     with st.spinner("⏳ Carregando base de equipamentos..."):
-        df_eqp = load_table(TABLES["equipamentos"]).copy()
 
-    # Helper local para opções dos filtros
-    def _opts_eqp(col: str):
-        if col not in df_eqp:
-            return []
-        return sorted(df_eqp[col].dropna().unique())
+        import pandas as pd
+        from google.cloud import bigquery
+
+        eqp_table_id = TABLES["equipamentos"]
+
+        # ----------------------- Cliente BQ -------------------
+        @st.cache_resource
+        def get_bq_client_eqp():
+            return bigquery.Client()
+
+        # ----------------------- WHERE dinâmico ---------------
+        def build_where_eqp(
+            ano_sel,
+            mes_sel,
+            uf_sel,
+            reg_saude_sel,
+            meso_sel,
+            micro_sel,
+            mun_sel,
+            ivs_sel,
+            tipo_novo_sel,
+            tipo_sel,
+            subtipo_sel,
+            gestao_sel,
+            convenio_sel,
+            natureza_sel,
+            status_sel,
+            # booleanos complexos / onco
+            onco_cacon_sel,
+            onco_unacon_sel,
+            onco_radio_sel,
+            onco_quimio_sel,
+            hab_onco_cir_sel,
+            uti_adulto_sel,
+            uti_ped_sel,
+            uti_neo_sel,
+            uti_cor_sel,
+            ucin_sel,
+            uti_queim_sel,
+            caps_psiq_sel,
+            rehab_cer_sel,
+            cardio_ac_sel,
+            nutricao_sel,
+            odonto_ceo_sel,
+            # tipos de equipamento
+            tipo_eqp_sel,
+            id_eqp_sel,
+        ):
+            """
+            Monta WHERE dinâmico + parâmetros BigQuery
+            para todos os filtros da aba Equipamentos.
+            """
+            clauses = ["1=1"]
+            params: list[bigquery.QueryParameter] = []
+
+            def add_in_array(col: str, param_name: str, values):
+                if values:
+                    vals = [str(v) for v in values]
+                    clauses.append(f"CAST({col} AS STRING) IN UNNEST(@{param_name})")
+                    params.append(
+                        bigquery.ArrayQueryParameter(param_name, "STRING", vals)
+                    )
+
+            def add_bool(col: str, param_name: str, values):
+                """
+                values é lista com 'Sim'/'Não'.
+                Convertemos para 1/0 e comparamos com SAFE_CAST(col AS INT64)
+                para funcionar com bool/int.
+                """
+                if not values:
+                    return
+                allowed = []
+                if "Sim" in values:
+                    allowed.append(1)
+                if "Não" in values:
+                    allowed.append(0)
+                if not allowed:
+                    return
+                clauses.append(
+                    f"SAFE_CAST({col} AS INT64) IN UNNEST(@{param_name})"
+                )
+                params.append(
+                    bigquery.ArrayQueryParameter(param_name, "INT64", allowed)
+                )
+
+            # Período / território
+            add_in_array("equipamentos_ano", "ano", ano_sel)
+            add_in_array("equipamentos_mes", "mes", mes_sel)
+            add_in_array("ibge_no_uf", "uf", uf_sel)
+            add_in_array("ibge_no_regiao_saude", "reg_saude", reg_saude_sel)
+            add_in_array("ibge_no_mesorregiao", "meso", meso_sel)
+            add_in_array("ibge_no_microrregiao", "micro", micro_sel)
+            add_in_array("ibge_no_municipio", "mun", mun_sel)
+            add_in_array("ibge_ivs", "ivs", ivs_sel)
+
+            # Perfil Estabelecimento
+            add_in_array(
+                "estabelecimentos_tipo_novo_do_estabelecimento",
+                "tipo_novo",
+                tipo_novo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_tipo_do_estabelecimento",
+                "tipo",
+                tipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_subtipo_do_estabelecimento",
+                "subtipo",
+                subtipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_gestao",
+                "gestao",
+                gestao_sel,
+            )
+            add_in_array(
+                "estabelecimentos_convenio_sus",
+                "convenio",
+                convenio_sel,
+            )
+            add_in_array(
+                "estabelecimentos_categoria_natureza_juridica",
+                "natureza",
+                natureza_sel,
+            )
+            add_in_array(
+                "estabelecimentos_status_do_estabelecimento",
+                "status_estab",
+                status_sel,
+            )
+
+            # Booleanos (onco / complexos / UTI / etc.)
+            add_bool("onco_cacon", "onco_cacon", onco_cacon_sel)
+            add_bool("onco_unacon", "onco_unacon", onco_unacon_sel)
+            add_bool("onco_radioterapia", "onco_radio", onco_radio_sel)
+            add_bool("onco_quimioterapia", "onco_quimio", onco_quimio_sel)
+            add_bool(
+                "habilitacao_agrupado_onco_cirurgica",
+                "onco_cir",
+                hab_onco_cir_sel,
+            )
+
+            add_bool("habilitacao_agrupado_uti_adulto", "uti_adulto", uti_adulto_sel)
+            add_bool("habilitacao_agrupado_uti_pediatrica", "uti_ped", uti_ped_sel)
+            add_bool("habilitacao_agrupado_uti_neonatal", "uti_neo", uti_neo_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_coronariana",
+                "uti_cor",
+                uti_cor_sel,
+            )
+            add_bool("habilitacao_agrupado_ucin", "ucin", ucin_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_queimados",
+                "uti_queim",
+                uti_queim_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_saude_mental_caps_psiq",
+                "caps_psiq",
+                caps_psiq_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_reabilitacao_cer",
+                "rehab_cer",
+                rehab_cer_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_cardio_alta_complex",
+                "cardio_ac",
+                cardio_ac_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_nutricao",
+                "nutricao",
+                nutricao_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_odontologia_ceo",
+                "odonto_ceo",
+                odonto_ceo_sel,
+            )
+
+            # Tipos de equipamento
+            add_in_array(
+                "equipamentos_tipo_equipamento",
+                "tipo_eqp",
+                tipo_eqp_sel,
+            )
+            add_in_array(
+                "equipamentos_id_equipamento",
+                "id_eqp",
+                id_eqp_sel,
+            )
+
+            where_sql = "WHERE " + " AND ".join(clauses)
+            return where_sql, params
+
+        # ----------------------- KPIs -------------------------
+        def query_eqp_kpis(where_sql: str, params, table_id: str):
+            """
+            KPIs direto do BigQuery:
+              - total_registros (linhas)
+              - total_eqp (soma equipamentos_quantidade)
+              - total_ativos (soma equipamentos_quantidade_ativos)
+              - média de equipamentos por UF
+              - média de equipamentos por Estabelecimento
+            """
+            client = get_bq_client_eqp()
+            sql = f"""
+            WITH base AS (
+              SELECT
+                equipamentos_id_estabelecimento_cnes,
+                ibge_no_uf,
+                COALESCE(CAST(equipamentos_quantidade AS FLOAT64), 0) AS qtd,
+                COALESCE(CAST(equipamentos_quantidade_ativos AS FLOAT64), 0) AS qtd_ativos
+              FROM `{table_id}`
+              {where_sql}
+            ),
+            uf_agg AS (
+              SELECT ibge_no_uf, SUM(qtd) AS eqp_uf
+              FROM base
+              GROUP BY ibge_no_uf
+            ),
+            estab_agg AS (
+              SELECT equipamentos_id_estabelecimento_cnes, SUM(qtd) AS eqp_estab
+              FROM base
+              GROUP BY equipamentos_id_estabelecimento_cnes
+            )
+            SELECT
+              (SELECT COUNT(*) FROM base) AS total_registros,
+              (SELECT SUM(qtd) FROM base) AS total_eqp,
+              (SELECT SUM(qtd_ativos) FROM base) AS total_ativos,
+              (SELECT AVG(eqp_uf) FROM uf_agg) AS media_uf,
+              (SELECT AVG(eqp_estab) FROM estab_agg) AS media_estab;
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            return df.iloc[0] if not df.empty else None
+
+        # ----------------------- Agregado por tipo ------------
+        def query_eqp_group_tipo(where_sql: str, params, table_id: str):
+            """
+            Soma de equipamentos por equipamentos_tipo_equipamento.
+            """
+            client = get_bq_client_eqp()
+            sql = f"""
+            SELECT
+              equipamentos_tipo_equipamento,
+              SUM(COALESCE(CAST(equipamentos_quantidade AS FLOAT64), 0)) AS qtd_equipamentos
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY equipamentos_tipo_equipamento
+            HAVING equipamentos_tipo_equipamento IS NOT NULL
+            ORDER BY qtd_equipamentos DESC
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Disponíveis x indisponíveis SUS
+        def query_eqp_sus_disp(where_sql: str, params, table_id: str):
+            """
+            Totais de equipamentos disponíveis e indisponíveis para o SUS.
+            Considera qualquer valor > 0 nos indicadores como "marcado".
+            """
+            client = get_bq_client_eqp()
+            sql = f"""
+            SELECT
+              SUM(
+                CASE WHEN SAFE_CAST(equipamentos_indicador_disponivel_sus AS FLOAT64) > 0
+                     THEN COALESCE(CAST(equipamentos_quantidade AS FLOAT64), 0)
+                     ELSE 0 END
+              ) AS total_disp,
+              SUM(
+                CASE WHEN SAFE_CAST(equipamentos_indicador_indisponivel_sus AS FLOAT64) > 0
+                     THEN COALESCE(CAST(equipamentos_quantidade AS FLOAT64), 0)
+                     ELSE 0 END
+              ) AS total_indisp
+            FROM `{table_id}`
+            {where_sql}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            if df.empty:
+                return 0, 0
+            row = df.iloc[0]
+            return float(row["total_disp"] or 0), float(row["total_indisp"] or 0)
+
+        # ----------------------- Tabela detalhada ------------
+        def query_eqp_detalhe(
+            where_sql: str,
+            params,
+            table_id: str,
+            cols: list[str],
+            limit_rows: int = 5000,
+        ) -> pd.DataFrame:
+            """
+            Busca dados detalhados dos equipamentos com os filtros aplicados,
+            limitado a `limit_rows` para exibição/CSV.
+            """
+            if not cols:
+                return pd.DataFrame()
+            client = get_bq_client_eqp()
+            cols_sql = ", ".join(cols)
+            sql = f"""
+            SELECT
+              {cols_sql}
+            FROM `{table_id}`
+            {where_sql}
+            LIMIT {limit_rows}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Opções de filtros (DISTINCT) -
+        @st.cache_data(show_spinner=False)
+        def _opts_eqp(col: str) -> list[str]:
+            """
+            Busca valores distintos de uma coluna na tabela de equipamentos.
+            Usado só para montar as opções dos filtros (sem aplicar WHERE).
+            """
+            client = get_bq_client_eqp()
+            sql = f"""
+            SELECT DISTINCT CAST({col} AS STRING) AS val
+            FROM `{eqp_table_id}`
+            WHERE {col} IS NOT NULL
+            ORDER BY val
+            """
+            try:
+                df = client.query(sql).to_dataframe()
+                return df["val"].dropna().tolist()
+            except Exception:
+                return []
+
+        # ----------------------- Carregar todas as opções ----
+        opts = {
+            # Período
+            "ano": _opts_eqp("equipamentos_ano"),
+            "mes": _opts_eqp("equipamentos_mes"),
+
+            # Território
+            "uf": _opts_eqp("ibge_no_uf"),
+            "reg_saude": _opts_eqp("ibge_no_regiao_saude"),
+            "meso": _opts_eqp("ibge_no_mesorregiao"),
+            "micro": _opts_eqp("ibge_no_microrregiao"),
+            "mun": _opts_eqp("ibge_no_municipio"),
+            "ivs": _opts_eqp("ibge_ivs"),
+
+            # Perfil do estabelecimento
+            "tipo_novo": _opts_eqp("estabelecimentos_tipo_novo_do_estabelecimento"),
+            "tipo": _opts_eqp("estabelecimentos_tipo_do_estabelecimento"),
+            "subtipo": _opts_eqp("estabelecimentos_subtipo_do_estabelecimento"),
+            "gestao": _opts_eqp("estabelecimentos_gestao"),
+            "convenio": _opts_eqp("estabelecimentos_convenio_sus"),
+            "natureza": _opts_eqp("estabelecimentos_categoria_natureza_juridica"),
+            "status": _opts_eqp("estabelecimentos_status_do_estabelecimento"),
+
+            # Tipos de equipamento
+            "tipo_eqp": _opts_eqp("equipamentos_tipo_equipamento"),
+            "id_eqp": _opts_eqp("equipamentos_id_equipamento"),
+        }
 
     # =========================================================
     # SIDEBAR DE FILTROS
@@ -3646,13 +4013,13 @@ elif aba == "🧰 Equipamentos":
         with st.expander("Fitros de Período", expanded=False):
             ano_sel = st.multiselect(
                 "Ano",
-                _opts_eqp("equipamentos_ano"),
+                opts["ano"],
                 key="eqp_ano",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_sel = st.multiselect(
                 "Mês",
-                _opts_eqp("equipamentos_mes"),
+                opts["mes"],
                 key="eqp_mes",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -3661,37 +4028,37 @@ elif aba == "🧰 Equipamentos":
         with st.expander("Fitros de Território", expanded=False):
             uf_sel = st.multiselect(
                 "UF",
-                _opts_eqp("ibge_no_uf"),
+                opts["uf"],
                 key="eqp_uf",
                 placeholder="(Todos. Filtros opcionais)",
             )
             reg_saude_sel = st.multiselect(
                 "Região de Saúde",
-                _opts_eqp("ibge_no_regiao_saude"),
+                opts["reg_saude"],
                 key="eqp_regsaude",
                 placeholder="(Todos. Filtros opcionais)",
             )
             meso_sel = st.multiselect(
                 "Mesorregião",
-                _opts_eqp("ibge_no_mesorregiao"),
+                opts["meso"],
                 key="eqp_meso",
                 placeholder="(Todos. Filtros opcionais)",
             )
             micro_sel = st.multiselect(
                 "Microrregião",
-                _opts_eqp("ibge_no_microrregiao"),
+                opts["micro"],
                 key="eqp_micro",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mun_sel = st.multiselect(
                 "Município",
-                _opts_eqp("ibge_no_municipio"),
+                opts["mun"],
                 key="eqp_mun",
                 placeholder="(Todos. Filtros opcionais)",
             )
             ivs_sel = st.multiselect(
                 "Município IVS",
-                _opts_eqp("ibge_ivs"),
+                opts["ivs"],
                 key="eqp_ivs",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -3700,43 +4067,43 @@ elif aba == "🧰 Equipamentos":
         with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
             tipo_novo_sel = st.multiselect(
                 "Tipo (novo)",
-                _opts_eqp("estabelecimentos_tipo_novo_do_estabelecimento"),
+                opts["tipo_novo"],
                 key="eqp_tipo_novo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_sel = st.multiselect(
                 "Tipo do estabelecimento",
-                _opts_eqp("estabelecimentos_tipo_do_estabelecimento"),
+                opts["tipo"],
                 key="eqp_tipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             subtipo_sel = st.multiselect(
                 "Subtipo",
-                _opts_eqp("estabelecimentos_subtipo_do_estabelecimento"),
+                opts["subtipo"],
                 key="eqp_subtipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             gestao_sel = st.multiselect(
                 "Gestão",
-                _opts_eqp("estabelecimentos_gestao"),
+                opts["gestao"],
                 key="eqp_gestao",
                 placeholder="(Todos. Filtros opcionais)",
             )
             convenio_sel = st.multiselect(
                 "Convênio SUS",
-                _opts_eqp("estabelecimentos_convenio_sus"),
+                opts["convenio"],
                 key="eqp_convenio",
                 placeholder="(Todos. Filtros opcionais)",
             )
             natureza_sel = st.multiselect(
                 "Natureza Jurídica",
-                _opts_eqp("estabelecimentos_categoria_natureza_juridica"),
+                opts["natureza"],
                 key="eqp_natjur",
                 placeholder="(Todos. Filtros opcionais)",
             )
             status_sel = st.multiselect(
                 "Status",
-                _opts_eqp("estabelecimentos_status_do_estabelecimento"),
+                opts["status"],
                 key="eqp_status",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -3745,149 +4112,128 @@ elif aba == "🧰 Equipamentos":
         with st.expander("Fitros de Complexos / Oncologia", expanded=False):
             def bool_multiselect(label, key):
                 return st.multiselect(
-                    label, ["Sim", "Não"], key=key,
+                    label,
+                    ["Sim", "Não"],
+                    key=key,
                     placeholder="(Todos. Filtros opcionais)",
                 )
 
-            onco_cacon_sel   = bool_multiselect("CACON",           "eqp_onco_cacon")
-            onco_unacon_sel  = bool_multiselect("UNACON",          "eqp_onco_unacon")
-            onco_radio_sel   = bool_multiselect("Radioterapia",    "eqp_onco_radio")
-            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "eqp_onco_quimio")
-            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "eqp_onco_cir")
+            onco_cacon_sel = bool_multiselect("CACON", "eqp_onco_cacon")
+            onco_unacon_sel = bool_multiselect("UNACON", "eqp_onco_unacon")
+            onco_radio_sel = bool_multiselect("Radioterapia", "eqp_onco_radio")
+            onco_quimio_sel = bool_multiselect("Quimioterapia", "eqp_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica", "eqp_onco_cir")
 
-            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "eqp_uti_adulto")
-            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "eqp_uti_ped")
-            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "eqp_uti_neo")
-            uti_cor_sel      = bool_multiselect("UTI Coronariana", "eqp_uti_cor")
-            ucin_sel         = bool_multiselect("UCIN",            "eqp_ucin")
-            uti_queim_sel    = bool_multiselect("UTI Queimados",   "eqp_uti_queim")
-            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "eqp_caps_psiq")
-            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "eqp_rehab_cer")
-            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "eqp_cardio_ac")
-            nutricao_sel     = bool_multiselect("Nutrição",              "eqp_nutricao")
-            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "eqp_odonto_ceo")
+            uti_adulto_sel = bool_multiselect("UTI Adulto", "eqp_uti_adulto")
+            uti_ped_sel = bool_multiselect("UTI Pediátrica", "eqp_uti_ped")
+            uti_neo_sel = bool_multiselect("UTI Neonatal", "eqp_uti_neo")
+            uti_cor_sel = bool_multiselect("UTI Coronariana", "eqp_uti_cor")
+            ucin_sel = bool_multiselect("UCIN", "eqp_ucin")
+            uti_queim_sel = bool_multiselect("UTI Queimados", "eqp_uti_queim")
+            caps_psiq_sel = bool_multiselect(
+                "Saúde Mental CAPS/Psiq", "eqp_caps_psiq"
+            )
+            rehab_cer_sel = bool_multiselect("Reabilitação CER", "eqp_rehab_cer")
+            cardio_ac_sel = bool_multiselect(
+                "Cardio Alta Complex.", "eqp_cardio_ac"
+            )
+            nutricao_sel = bool_multiselect("Nutrição", "eqp_nutricao")
+            odonto_ceo_sel = bool_multiselect(
+                "Odontologia CEO", "eqp_odonto_ceo"
+            )
 
         # ----------------- Tipos de Equipamento -----------------
         with st.expander("Fitros de Tipos de Equipamento", expanded=False):
             tipo_eqp_sel = st.multiselect(
                 "Tipo de equipamento",
-                _opts_eqp("equipamentos_tipo_equipamento"),
+                opts["tipo_eqp"],
                 key="eqp_tipo_equipamento",
                 placeholder="(Todos. Filtros opcionais)",
             )
             id_eqp_sel = st.multiselect(
                 "Código do equipamento",
-                _opts_eqp("equipamentos_id_equipamento"),
+                opts["id_eqp"],
                 key="eqp_id_equipamento",
                 placeholder="(Todos. Filtros opcionais)",
             )
 
     # =========================================================
-    # Aplicação dos filtros
+    # Detectar mudanças de filtros + WHERE/params
     # =========================================================
-    dfe = df_eqp.copy()
+    filter_values = {
+        "ano": ano_sel,
+        "mes": mes_sel,
+        "uf": uf_sel,
+        "reg_saude": reg_saude_sel,
+        "meso": meso_sel,
+        "micro": micro_sel,
+        "mun": mun_sel,
+        "ivs": ivs_sel,
+        "tipo_novo": tipo_novo_sel,
+        "tipo": tipo_sel,
+        "subtipo": subtipo_sel,
+        "gestao": gestao_sel,
+        "convenio": convenio_sel,
+        "natureza": natureza_sel,
+        "status": status_sel,
+        "onco_cacon": onco_cacon_sel,
+        "onco_unacon": onco_unacon_sel,
+        "onco_radio": onco_radio_sel,
+        "onco_quimio": onco_quimio_sel,
+        "hab_onco_cir": hab_onco_cir_sel,
+        "uti_adulto": uti_adulto_sel,
+        "uti_ped": uti_ped_sel,
+        "uti_neo": uti_neo_sel,
+        "uti_cor": uti_cor_sel,
+        "ucin": ucin_sel,
+        "uti_queim": uti_queim_sel,
+        "caps_psiq": caps_psiq_sel,
+        "rehab_cer": rehab_cer_sel,
+        "cardio_ac": cardio_ac_sel,
+        "nutricao": nutricao_sel,
+        "odonto_ceo": odonto_ceo_sel,
+        "tipo_eqp": tipo_eqp_sel,
+        "id_eqp": id_eqp_sel,
+    }
 
-    def apply_multisel(df, col, sel):
-        if sel and col in df:
-            return df[df[col].isin(sel)]
-        return df
+    filters_changed = any(did_filters_change(k, v) for k, v in filter_values.items())
+    spinner = st.spinner("⏳ Atualizando resultados…") if filters_changed else DummySpinner()
 
-    # Período / território
-    dfe = apply_multisel(dfe, "equipamentos_ano", ano_sel)
-    dfe = apply_multisel(dfe, "equipamentos_mes", mes_sel)
-    dfe = apply_multisel(dfe, "ibge_no_uf",       uf_sel)
-    dfe = apply_multisel(dfe, "ibge_no_regiao_saude", reg_saude_sel)
-    dfe = apply_multisel(dfe, "ibge_no_mesorregiao",  meso_sel)
-    dfe = apply_multisel(dfe, "ibge_no_microrregiao", micro_sel)
-    dfe = apply_multisel(dfe, "ibge_no_municipio",    mun_sel)
-    dfe = apply_multisel(dfe, "ibge_ivs",             ivs_sel)
-
-    # Perfil Estabelecimento
-    dfe = apply_multisel(dfe, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_gestao",                       gestao_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_convenio_sus",                 convenio_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
-    dfe = apply_multisel(dfe, "estabelecimentos_status_do_estabelecimento",    status_sel)
-
-    # Booleanos (Onco / Complexos)
-    def apply_bool(df, col, sel):
-        if not sel or col not in df:
-            return df
-        allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
-        return df[df[col].astype("boolean").isin(allowed)]
-
-    dfe = apply_bool(dfe, "onco_cacon",                          onco_cacon_sel)
-    dfe = apply_bool(dfe, "onco_unacon",                         onco_unacon_sel)
-    dfe = apply_bool(dfe, "onco_radioterapia",                   onco_radio_sel)
-    dfe = apply_bool(dfe, "onco_quimioterapia",                  onco_quimio_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
-
-    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_ucin",           ucin_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_nutricao",                nutricao_sel)
-    dfe = apply_bool(dfe, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
-
-    # Tipos de equipamento
-    dfe = apply_multisel(dfe, "equipamentos_tipo_equipamento", tipo_eqp_sel)
-    dfe = apply_multisel(dfe, "equipamentos_id_equipamento",   id_eqp_sel)
-
-    # Se depois dos filtros não sobrar nada, aborta o resto
-    if dfe.empty:
-        st.warning("Nenhum equipamento encontrado com os filtros selecionados.")
-        st.stop()
-
-    # =========================================================
-    # METRIC CARDS
-    # =========================================================
-    st.info("📏 Grandes números: visão rápida dos equipamentos filtrados")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        if "equipamentos_quantidade" in dfe.columns:
-            total_eqp = dfe["equipamentos_quantidade"].sum()
-        else:
-            total_eqp = dfe.shape[0]
-        st.metric("Total de equipamentos (somados)", fmt_num(total_eqp))
-
-    with col2:
-        if "equipamentos_quantidade_ativos" in dfe.columns:
-            total_ativos = dfe["equipamentos_quantidade_ativos"].sum()
-            st.metric("Equipamentos ativos (somados)", fmt_num(total_ativos))
-        else:
-            st.metric("Equipamentos ativos (somados)", "-")
-
-    with col3:
-        if "ibge_no_uf" in dfe.columns and "equipamentos_quantidade" in dfe.columns:
-            mean_uf = (
-                dfe.groupby("ibge_no_uf")["equipamentos_quantidade"].sum().mean()
-            )
-            st.metric("Média de equipamentos por UF", fmt_num(mean_uf))
-        else:
-            st.metric("Média de equipamentos por UF", "-")
-
-    with col4:
-        id_estab_col = "equipamentos_id_estabelecimento_cnes" if "equipamentos_id_estabelecimento_cnes" in dfe.columns else "cnes"
-        if id_estab_col in dfe.columns and "equipamentos_quantidade" in dfe.columns:
-            mean_estab = (
-                dfe.groupby(id_estab_col)["equipamentos_quantidade"].sum().mean()
-            )
-            st.metric("Média de equipamentos por Estabelecimento", fmt_num(mean_estab))
-        else:
-            st.metric("Média de equipamentos por Estabelecimento", "-")
+    where_sql_eqp, bq_params_eqp = build_where_eqp(
+        ano_sel,
+        mes_sel,
+        uf_sel,
+        reg_saude_sel,
+        meso_sel,
+        micro_sel,
+        mun_sel,
+        ivs_sel,
+        tipo_novo_sel,
+        tipo_sel,
+        subtipo_sel,
+        gestao_sel,
+        convenio_sel,
+        natureza_sel,
+        status_sel,
+        onco_cacon_sel,
+        onco_unacon_sel,
+        onco_radio_sel,
+        onco_quimio_sel,
+        hab_onco_cir_sel,
+        uti_adulto_sel,
+        uti_ped_sel,
+        uti_neo_sel,
+        uti_cor_sel,
+        ucin_sel,
+        uti_queim_sel,
+        caps_psiq_sel,
+        rehab_cer_sel,
+        cardio_ac_sel,
+        nutricao_sel,
+        odonto_ceo_sel,
+        tipo_eqp_sel,
+        id_eqp_sel,
+    )
 
     # =========================================================
     # Função helper para limitar categorias nos gráficos
@@ -3903,125 +4249,162 @@ elif aba == "🧰 Equipamentos":
         df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
         return df2
 
-    # ============================================================
-    # 📊 GRÁFICOS
-    # ============================================================
-    st.info("📊 Gráficos — resumo visual dos equipamentos filtrados")
+    # =========================================================
+    # BLOCO PRINCIPAL COM SPINNER DE RESULTADOS
+    # =========================================================
+    with spinner:
+        # ======================== KPIs =======================
+        st.info("📏 Grandes números: visão rápida dos equipamentos filtrados")
 
-    # 1) Equipamentos por tipo
-    with st.expander("Equipamentos por tipo", expanded=True):
-        if "equipamentos_tipo_equipamento" in dfe.columns and "equipamentos_quantidade" in dfe.columns:
-            df_tipo = (
-                dfe.groupby("equipamentos_tipo_equipamento")["equipamentos_quantidade"]
-                   .sum()
-                   .reset_index(name="qtd_equipamentos")
-            )
-            df_tipo = df_tipo.sort_values("qtd_equipamentos", ascending=False)
-            df_tipo = col_top_n(df_tipo, "equipamentos_tipo_equipamento", top_n=30)
+        kpis_eqp = query_eqp_kpis(where_sql_eqp, bq_params_eqp, eqp_table_id)
 
-            fig_tipo = bar_total_por_grupo(
-                df_tipo,
-                grupo_col="equipamentos_tipo_equipamento",
-                valor_col="qtd_equipamentos",
-                titulo="Distribuição de equipamentos por tipo",
-                x_label="Quantidade de equipamentos",
-                y_label="Tipo de equipamento",
-                orientation="h",
-            )
-            st.plotly_chart(fig_tipo, use_container_width=True)
-        else:
-            st.info("Colunas de tipo de equipamento ou quantidade não estão disponíveis.")
+        if kpis_eqp is None or (kpis_eqp["total_registros"] or 0) == 0:
+            st.warning("Nenhum equipamento encontrado com os filtros selecionados.")
+            st.stop()
 
-    # 2) Equipamentos disponíveis x indisponíveis SUS
-    with st.expander("Equipamentos disponíveis x indisponíveis para o SUS", expanded=False):
-        if (
-            "equipamentos_indicador_disponivel_sus" in dfe.columns
-            or "equipamentos_indicador_indisponivel_sus" in dfe.columns
+        total_reg = int(kpis_eqp["total_registros"] or 0)
+        total_eqp = float(kpis_eqp["total_eqp"] or 0)
+        total_ativos = float(kpis_eqp["total_ativos"] or 0)
+        media_uf = kpis_eqp["media_uf"] or 0
+        media_estab = kpis_eqp["media_estab"] or 0
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Total de equipamentos (somados)", fmt_num(total_eqp))
+
+        with col2:
+            st.metric("Equipamentos ativos (somados)", fmt_num(total_ativos))
+
+        with col3:
+            st.metric("Média de equipamentos por UF", fmt_num(media_uf))
+
+        with col4:
+            st.metric("Média de equipamentos por Estabelecimento", fmt_num(media_estab))
+
+        # ======================== GRÁFICOS ====================
+        st.info("📊 Gráficos — resumo visual dos equipamentos filtrados")
+
+        # 1) Equipamentos por tipo
+        with st.expander("Equipamentos por tipo", expanded=True):
+            df_tipo = query_eqp_group_tipo(where_sql_eqp, bq_params_eqp, eqp_table_id)
+            if not df_tipo.empty:
+                df_tipo = df_tipo.sort_values("qtd_equipamentos", ascending=False)
+                df_tipo = col_top_n(
+                    df_tipo, "equipamentos_tipo_equipamento", top_n=30
+                )
+
+                fig_tipo = bar_total_por_grupo(
+                    df_tipo,
+                    grupo_col="equipamentos_tipo_equipamento",
+                    valor_col="qtd_equipamentos",
+                    titulo="Distribuição de equipamentos por tipo",
+                    x_label="Quantidade de equipamentos",
+                    y_label="Tipo de equipamento",
+                    orientation="h",
+                )
+                st.plotly_chart(fig_tipo, use_container_width=True)
+            else:
+                st.info(
+                    "Colunas de tipo de equipamento ou quantidade não estão disponíveis."
+                )
+
+        # 2) Equipamentos disponíveis x indisponíveis SUS
+        with st.expander(
+            "Equipamentos disponíveis x indisponíveis para o SUS", expanded=False
         ):
-            # Considera qualquer valor > 0 como "marcado"
-            disp_mask  = dfe.get("equipamentos_indicador_disponivel_sus", 0)    > 0
-            indisp_mask = dfe.get("equipamentos_indicador_indisponivel_sus", 0) > 0
-
-            # Soma quantidade de equipamentos em cada grupo
-            total_disp  = dfe.loc[disp_mask,  "equipamentos_quantidade"].sum() if "equipamentos_quantidade" in dfe.columns else disp_mask.sum()
-            total_indisp = dfe.loc[indisp_mask,"equipamentos_quantidade"].sum() if "equipamentos_quantidade" in dfe.columns else indisp_mask.sum()
-
-            df_sus = pd.DataFrame({
-                "categoria": ["Disponíveis SUS", "Indisponíveis SUS"],
-                "qtd": [total_disp, total_indisp],
-            })
-
-            fig_sus = bar_total_por_grupo(
-                df_sus,
-                grupo_col="categoria",
-                valor_col="qtd",
-                titulo="Equipamentos disponíveis x indisponíveis para o SUS",
-                x_label="Quantidade de equipamentos",
-                y_label="Categoria",
-                orientation="v",
+            total_disp, total_indisp = query_eqp_sus_disp(
+                where_sql_eqp, bq_params_eqp, eqp_table_id
             )
-            st.plotly_chart(fig_sus, use_container_width=True)
-        else:
-            st.info("Não há colunas de indicador de disponibilidade SUS na base.")
 
-    # ============================================================
-    # 📋 TABELA DESCRITIVA — Equipamentos (com limite de linhas)
-    # ============================================================
-    st.info("📋 Tabela descritiva dos equipamentos filtrados")
+            if total_disp + total_indisp > 0:
+                df_sus = pd.DataFrame(
+                    {
+                        "categoria": ["Disponíveis SUS", "Indisponíveis SUS"],
+                        "qtd": [total_disp, total_indisp],
+                    }
+                )
 
-    cols_desc = [
-        "equipamentos_ano",
-        "equipamentos_mes",
-        "ibge_no_municipio",
-        "ibge_no_uf",
-        "equipamentos_id_equipamento",
-        "equipamentos_tipo_equipamento",
-        "equipamentos_quantidade",
-        "equipamentos_quantidade_ativos",
-        "equipamentos_indicador_disponivel_sus",
-        "equipamentos_indicador_indisponivel_sus",
-        "equipamentos_id_estabelecimento_cnes",
-        "estabelecimentos_nome_fantasia",
-        "estabelecimentos_tipo_novo_do_estabelecimento",
-        "estabelecimentos_subtipo_do_estabelecimento",
-        "estabelecimentos_gestao",
-        "estabelecimentos_status_do_estabelecimento",
-        "estabelecimentos_convenio_sus",
-        "estabelecimentos_categoria_natureza_juridica",
-        "onco_cacon",
-        "onco_unacon",
-        "onco_radioterapia",
-        "onco_quimioterapia",
-    ]
+                fig_sus = bar_total_por_grupo(
+                    df_sus,
+                    grupo_col="categoria",
+                    valor_col="qtd",
+                    titulo="Equipamentos disponíveis x indisponíveis para o SUS",
+                    x_label="Categoria",
+                    y_label="Quantidade de equipamentos",
+                    orientation="v",
+                )
+                st.plotly_chart(fig_sus, use_container_width=True)
+            else:
+                st.info(
+                    "Não há dados de indicador de disponibilidade SUS para os filtros selecionados."
+                )
 
-    cols_ok = [c for c in cols_desc if c in dfe.columns]
+        # ======================== TABELA DESCRITIVA ===========
+        st.info("📋 Tabela descritiva dos equipamentos filtrados")
 
-    if cols_ok:
+        cols_desc = [
+            "equipamentos_ano",
+            "equipamentos_mes",
+            "ibge_no_municipio",
+            "ibge_no_uf",
+            "equipamentos_id_equipamento",
+            "equipamentos_tipo_equipamento",
+            "equipamentos_quantidade",
+            "equipamentos_quantidade_ativos",
+            "equipamentos_indicador_disponivel_sus",
+            "equipamentos_indicador_indisponivel_sus",
+            "equipamentos_id_estabelecimento_cnes",
+            "estabelecimentos_nome_fantasia",
+            "estabelecimentos_tipo_novo_do_estabelecimento",
+            "estabelecimentos_subtipo_do_estabelecimento",
+            "estabelecimentos_gestao",
+            "estabelecimentos_status_do_estabelecimento",
+            "estabelecimentos_convenio_sus",
+            "estabelecimentos_categoria_natureza_juridica",
+            "onco_cacon",
+            "onco_unacon",
+            "onco_radioterapia",
+            "onco_quimioterapia",
+        ]
+
+        cols_ok = cols_desc  # assumindo schema coerente com a tabela
+
         max_rows_display = 5000
-        n_total = dfe.shape[0]
+        n_total = total_reg
 
         if n_total > max_rows_display:
             st.warning(
                 f"A base filtrada possui {fmt_num(n_total)} linhas. "
                 f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
-                "Use o botão de download para obter o conjunto completo."
+                "O download também está limitado às mesmas linhas."
             )
         else:
             st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
 
-        df_display = dfe[cols_ok].head(max_rows_display)
-
-        st.dataframe(df_display, use_container_width=True, height=500)
-
-        csv = dfe[cols_ok].to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 Baixar CSV",
-            csv,
-            "equipamentos_filtrados.csv",
-            "text/csv",
+        df_display = query_eqp_detalhe(
+            where_sql_eqp,
+            bq_params_eqp,
+            eqp_table_id,
+            cols_ok,
+            limit_rows=max_rows_display,
         )
-    else:
-        st.info("Não existem colunas suficientes para montar a tabela de equipamentos.")
+
+        if df_display.empty:
+            st.warning(
+                "Não foi possível carregar a tabela detalhada de equipamentos com os filtros aplicados."
+            )
+        else:
+            st.dataframe(df_display, use_container_width=True, height=500)
+
+            csv = df_display.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Baixar CSV (até 5.000 linhas)",
+                csv,
+                "equipamentos_filtrados.csv",
+                "text/csv",
+                use_container_width=True,
+            )
 
 # =====================================================================
 # X) Cadastro Profissionais
