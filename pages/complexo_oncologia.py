@@ -1917,359 +1917,429 @@ elif aba == "🗂️ Serviços":
 elif aba == "✅ Habilitação":
     st.subheader("✅ Habilitação")
 
-    import pandas as pd
-    from google.cloud import bigquery
-
     # ---------------------------------------------------------
-    # Referência da tabela no BigQuery
+    # Carregar base para filtros / inicializar helpers
+    # (spinner de página inteira, igual Serviços/Estabelecimentos)
     # ---------------------------------------------------------
-    hab_table_id = TABLES["habilitacao"]
+    with st.spinner("⏳ Carregando base de habilitações..."):
 
-    # ---------------------------------------------------------
-    # Helpers para BigQuery (cliente)
-    # ---------------------------------------------------------
-    @st.cache_resource
-    def get_bq_client_hab():
-        return bigquery.Client()
+        import pandas as pd
+        from google.cloud import bigquery
 
-    # ---------------------------------------------------------
-    # WHERE dinâmico (para todas as queries do BQ)
-    # ---------------------------------------------------------
-    def build_where_hab(
-        ano_hab_sel,
-        mes_hab_sel,
-        ano_comp_ini_sel,
-        mes_comp_ini_sel,
-        ano_comp_fim_sel,
-        mes_comp_fim_sel,
-        ano_portaria_sel,
-        mes_portaria_sel,
-        uf_sel,
-        reg_saude_sel,
-        meso_sel,
-        micro_sel,
-        mun_sel,
-        ivs_sel,
-        tipo_novo_sel,
-        subtipo_sel,
-        gestao_sel,
-        convenio_sel,
-        nat_jur_sel,
-        status_sel,
-        nivel_tipo_sel,
-        cat_hab_sel,
-        no_hab_sel,
-        tag_hab_sel,
-    ):
-        """
-        Monta WHERE dinâmico + parâmetros BigQuery
-        para todos os filtros da aba Habilitações.
-        """
-        clauses = ["1=1"]
-        params: list[bigquery.QueryParameter] = []
+        # Referência da tabela no BigQuery
+        hab_table_id = TABLES["habilitacao"]
 
-        def add_in_array(col: str, param_name: str, values):
-            if values:
-                vals = [str(v) for v in values]
-                clauses.append(f"CAST({col} AS STRING) IN UNNEST(@{param_name})")
-                params.append(bigquery.ArrayQueryParameter(param_name, "STRING", vals))
+        # -----------------------------------------------------
+        # Cliente BigQuery
+        # -----------------------------------------------------
+        @st.cache_resource
+        def get_bq_client_hab():
+            return bigquery.Client()
 
-        # Período
-        add_in_array("habilitacao_ano", "ano_hab", ano_hab_sel)
-        add_in_array("habilitacao_mes", "mes_hab", mes_hab_sel)
-        add_in_array("habilitacao_ano_competencia_inicial", "ano_comp_ini", ano_comp_ini_sel)
-        add_in_array("habilitacao_mes_competencia_inicial", "mes_comp_ini", mes_comp_ini_sel)
-        add_in_array("habilitacao_ano_competencia_final", "ano_comp_fim", ano_comp_fim_sel)
-        add_in_array("habilitacao_mes_competencia_final", "mes_comp_fim", mes_comp_fim_sel)
-        add_in_array("habilitacao_ano_portaria", "ano_portaria", ano_portaria_sel)
-        add_in_array("habilitacao_mes_portaria", "mes_portaria", mes_portaria_sel)
-
-        # Território
-        add_in_array("ibge_no_uf", "uf", uf_sel)
-        add_in_array("ibge_no_regiao_saude", "reg_saude", reg_saude_sel)
-        add_in_array("ibge_no_mesorregiao", "meso", meso_sel)
-        add_in_array("ibge_no_microrregiao", "micro", micro_sel)
-        add_in_array("ibge_no_municipio", "mun", mun_sel)
-        add_in_array("ibge_ivs", "ivs", ivs_sel)
-
-        # Perfil do estabelecimento
-        add_in_array(
-            "estabelecimentos_tipo_novo_do_estabelecimento",
-            "tipo_novo",
+        # -----------------------------------------------------
+        # WHERE dinâmico (para todas as queries do BQ)
+        # -----------------------------------------------------
+        def build_where_hab(
+            ano_hab_sel,
+            mes_hab_sel,
+            ano_comp_ini_sel,
+            mes_comp_ini_sel,
+            ano_comp_fim_sel,
+            mes_comp_fim_sel,
+            ano_portaria_sel,
+            mes_portaria_sel,
+            uf_sel,
+            reg_saude_sel,
+            meso_sel,
+            micro_sel,
+            mun_sel,
+            ivs_sel,
             tipo_novo_sel,
-        )
-        add_in_array(
-            "estabelecimentos_subtipo_do_estabelecimento",
-            "subtipo",
             subtipo_sel,
-        )
-        add_in_array(
-            "estabelecimentos_gestao",
-            "gestao",
             gestao_sel,
-        )
-        add_in_array(
-            "estabelecimentos_convenio_sus",
-            "convenio",
             convenio_sel,
-        )
-        add_in_array(
-            "estabelecimentos_categoria_natureza_juridica",
-            "nat_jur",
             nat_jur_sel,
-        )
-        add_in_array(
-            "estabelecimentos_status_do_estabelecimento",
-            "status_estab",
             status_sel,
-        )
-
-        # Habilitação
-        add_in_array(
-            "habilitacao_nivel_habilitacao_tipo",
-            "nivel_tipo",
             nivel_tipo_sel,
-        )
-        add_in_array(
-            "referencia_habilitacao_no_categoria",
-            "cat_hab",
             cat_hab_sel,
-        )
-        add_in_array(
-            "referencia_habilitacao_no_habilitacao",
-            "no_hab",
             no_hab_sel,
-        )
-        add_in_array(
-            "referencia_habilitacao_ds_tag",
-            "tag_hab",
             tag_hab_sel,
-        )
+        ):
+            """
+            Monta WHERE dinâmico + parâmetros BigQuery
+            para todos os filtros da aba Habilitações.
+            """
+            clauses = ["1=1"]
+            params = []
 
-        where_sql = "WHERE " + " AND ".join(clauses)
-        return where_sql, params
+            def add_in_array(col: str, param_name: str, values):
+                if values:
+                    vals = [str(v) for v in values]
+                    clauses.append(f"CAST({col} AS STRING) IN UNNEST(@{param_name})")
+                    params.append(
+                        bigquery.ArrayQueryParameter(param_name, "STRING", vals)
+                    )
 
-    # ---------------------------------------------------------
-    # KPIs (BigQuery)
-    # ---------------------------------------------------------
-    def query_hab_kpis(where_sql: str, params, table_id: str):
-        """
-        KPIs direto do BigQuery:
-          - total de habilitações (linhas)
-          - média por UF
-          - média por Região de Saúde
-          - média por Estabelecimento
-        """
-        client = get_bq_client_hab()
-        sql = f"""
-        WITH base AS (
-          SELECT
-            habilitacao_id_estabelecimento_cnes,
-            ibge_no_uf,
-            ibge_no_regiao_saude
-          FROM `{table_id}`
-          {where_sql}
-        ),
-        uf_agg AS (
-          SELECT ibge_no_uf, COUNT(*) AS hab_por_uf
-          FROM base
-          GROUP BY ibge_no_uf
-        ),
-        reg_agg AS (
-          SELECT ibge_no_regiao_saude, COUNT(*) AS hab_por_reg
-          FROM base
-          GROUP BY ibge_no_regiao_saude
-        ),
-        estab_agg AS (
-          SELECT habilitacao_id_estabelecimento_cnes, COUNT(*) AS hab_por_estab
-          FROM base
-          GROUP BY habilitacao_id_estabelecimento_cnes
-        )
-        SELECT
-          (SELECT COUNT(*) FROM base) AS total_hab,
-          (SELECT AVG(hab_por_uf) FROM uf_agg) AS media_uf,
-          (SELECT AVG(hab_por_reg) FROM reg_agg) AS media_reg_saude,
-          (SELECT AVG(hab_por_estab) FROM estab_agg) AS media_estab;
-        """
-        job = client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=params),
-        )
-        df = job.to_dataframe()
-        return df.iloc[0]
+            # Período
+            add_in_array("habilitacao_ano", "ano_hab", ano_hab_sel)
+            add_in_array("habilitacao_mes", "mes_hab", mes_hab_sel)
+            add_in_array(
+                "habilitacao_ano_competencia_inicial",
+                "ano_comp_ini",
+                ano_comp_ini_sel,
+            )
+            add_in_array(
+                "habilitacao_mes_competencia_inicial",
+                "mes_comp_ini",
+                mes_comp_ini_sel,
+            )
+            add_in_array(
+                "habilitacao_ano_competencia_final",
+                "ano_comp_fim",
+                ano_comp_fim_sel,
+            )
+            add_in_array(
+                "habilitacao_mes_competencia_final",
+                "mes_comp_fim",
+                mes_comp_fim_sel,
+            )
+            add_in_array(
+                "habilitacao_ano_portaria",
+                "ano_portaria",
+                ano_portaria_sel,
+            )
+            add_in_array(
+                "habilitacao_mes_portaria",
+                "mes_portaria",
+                mes_portaria_sel,
+            )
 
-    # ---------------------------------------------------------
-    # Agregado genérico (BigQuery)
-    # ---------------------------------------------------------
-    def query_hab_group(
-        where_sql: str,
-        params,
-        table_id: str,
-        col: str,
-        null_label: str = "(não informado)",
-        order_desc: bool = True,
-    ) -> pd.DataFrame:
-        """
-        Agregado genérico: conta habilitações por coluna categórica.
-        Retorna df com 'categoria' e 'qtde'.
-        """
-        client = get_bq_client_hab()
-        order_dir = "DESC" if order_desc else "ASC"
-        sql = f"""
-        SELECT
-          COALESCE(CAST({col} AS STRING), @null_label) AS categoria,
-          COUNT(*) AS qtde
-        FROM `{table_id}`
-        {where_sql}
-        GROUP BY categoria
-        ORDER BY qtde {order_dir}
-        """
-        job = client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(
-                query_parameters=list(params) + [
-                    bigquery.ScalarQueryParameter("null_label", "STRING", null_label)
-                ]
+            # Território
+            add_in_array("ibge_no_uf", "uf", uf_sel)
+            add_in_array("ibge_no_regiao_saude", "reg_saude", reg_saude_sel)
+            add_in_array("ibge_no_mesorregiao", "meso", meso_sel)
+            add_in_array("ibge_no_microrregiao", "micro", micro_sel)
+            add_in_array("ibge_no_municipio", "mun", mun_sel)
+            add_in_array("ibge_ivs", "ivs", ivs_sel)
+
+            # Perfil do estabelecimento
+            add_in_array(
+                "estabelecimentos_tipo_novo_do_estabelecimento",
+                "tipo_novo",
+                tipo_novo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_subtipo_do_estabelecimento",
+                "subtipo",
+                subtipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_gestao",
+                "gestao",
+                gestao_sel,
+            )
+            add_in_array(
+                "estabelecimentos_convenio_sus",
+                "convenio",
+                convenio_sel,
+            )
+            add_in_array(
+                "estabelecimentos_categoria_natureza_juridica",
+                "nat_jur",
+                nat_jur_sel,
+            )
+            add_in_array(
+                "estabelecimentos_status_do_estabelecimento",
+                "status_estab",
+                status_sel,
+            )
+
+            # Habilitação
+            add_in_array(
+                "habilitacao_nivel_habilitacao_tipo",
+                "nivel_tipo",
+                nivel_tipo_sel,
+            )
+            add_in_array(
+                "referencia_habilitacao_no_categoria",
+                "cat_hab",
+                cat_hab_sel,
+            )
+            add_in_array(
+                "referencia_habilitacao_no_habilitacao",
+                "no_hab",
+                no_hab_sel,
+            )
+            add_in_array(
+                "referencia_habilitacao_ds_tag",
+                "tag_hab",
+                tag_hab_sel,
+            )
+
+            where_sql = "WHERE " + " AND ".join(clauses)
+            return where_sql, params
+
+        # -----------------------------------------------------
+        # KPIs (BigQuery)
+        # -----------------------------------------------------
+        def query_hab_kpis(where_sql: str, params, table_id: str):
+            """
+            KPIs direto do BigQuery:
+              - total de habilitações (linhas)
+              - média por UF
+              - média por Região de Saúde
+              - média por Estabelecimento
+            """
+            client = get_bq_client_hab()
+            sql = f"""
+            WITH base AS (
+              SELECT
+                habilitacao_id_estabelecimento_cnes,
+                ibge_no_uf,
+                ibge_no_regiao_saude
+              FROM `{table_id}`
+              {where_sql}
             ),
-        )
-        return job.to_dataframe()
+            uf_agg AS (
+              SELECT ibge_no_uf, COUNT(*) AS hab_por_uf
+              FROM base
+              GROUP BY ibge_no_uf
+            ),
+            reg_agg AS (
+              SELECT ibge_no_regiao_saude, COUNT(*) AS hab_por_reg
+              FROM base
+              GROUP BY ibge_no_regiao_saude
+            ),
+            estab_agg AS (
+              SELECT habilitacao_id_estabelecimento_cnes, COUNT(*) AS hab_por_estab
+              FROM base
+              GROUP BY habilitacao_id_estabelecimento_cnes
+            )
+            SELECT
+              (SELECT COUNT(*) FROM base) AS total_hab,
+              (SELECT AVG(hab_por_uf) FROM uf_agg) AS media_uf,
+              (SELECT AVG(hab_por_reg) FROM reg_agg) AS media_reg_saude,
+              (SELECT AVG(hab_por_estab) FROM estab_agg) AS media_estab;
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            return df.iloc[0]
 
-    # ---------------------------------------------------------
-    # Série temporal anual (BigQuery)
-    # ---------------------------------------------------------
-    def query_hab_por_ano(where_sql: str, params, table_id: str) -> pd.DataFrame:
-        """
-        Retorna série temporal anual de habilitações.
-        """
-        client = get_bq_client_hab()
-        sql = f"""
-        SELECT
-          SAFE_CAST(habilitacao_ano AS INT64) AS ano,
-          COUNT(*) AS qtd_habilitacoes
-        FROM `{table_id}`
-        {where_sql}
-        GROUP BY ano
-        HAVING ano IS NOT NULL
-        ORDER BY ano
-        """
-        job = client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=params),
-        )
-        return job.to_dataframe()
+        # -----------------------------------------------------
+        # Agregado genérico (BigQuery)
+        # -----------------------------------------------------
+        def query_hab_group(
+            where_sql: str,
+            params,
+            table_id: str,
+            col: str,
+            null_label: str = "(não informado)",
+            order_desc: bool = True,
+        ) -> pd.DataFrame:
+            """
+            Agregado genérico: conta habilitações por coluna categórica.
+            Retorna df com 'categoria' e 'qtde'.
+            """
+            client = get_bq_client_hab()
+            order_dir = "DESC" if order_desc else "ASC"
+            sql = f"""
+            SELECT
+              COALESCE(CAST({col} AS STRING), @null_label) AS categoria,
+              COUNT(*) AS qtde
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY categoria
+            ORDER BY qtde {order_dir}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(
+                    query_parameters=list(params)
+                    + [
+                        bigquery.ScalarQueryParameter(
+                            "null_label", "STRING", null_label
+                        )
+                    ]
+                ),
+            )
+            return job.to_dataframe()
 
-    # ---------------------------------------------------------
-    # Ativas vs Encerradas (BigQuery)
-    # ---------------------------------------------------------
-    def query_hab_status(where_sql: str, params, table_id: str):
-        """
-        Calcula total de habilitações ativas e encerradas direto no BigQuery.
-        Regra:
-          - Ativa se ano_final=9999 e mes_final=9999
-          - Ou se (ano_final*100 + mes_final) >= competência atual (ano*100+mes)
-          - Caso contrário, encerrada
-        """
-        client = get_bq_client_hab()
+        # -----------------------------------------------------
+        # Série temporal anual (BigQuery)
+        # -----------------------------------------------------
+        def query_hab_por_ano(where_sql: str, params, table_id: str) -> pd.DataFrame:
+            """
+            Retorna série temporal anual de habilitações.
+            """
+            client = get_bq_client_hab()
+            sql = f"""
+            SELECT
+              SAFE_CAST(habilitacao_ano AS INT64) AS ano,
+              COUNT(*) AS qtd_habilitacoes
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY ano
+            HAVING ano IS NOT NULL
+            ORDER BY ano
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
 
-        hoje = pd.Timestamp.today()
-        comp_atual = hoje.year * 100 + hoje.month
+        # -----------------------------------------------------
+        # Ativas vs Encerradas (BigQuery)
+        # -----------------------------------------------------
+        def query_hab_status(where_sql: str, params, table_id: str):
+            """
+            Calcula total de habilitações ativas e encerradas direto no BigQuery.
+            Regra:
+              - Ativa se ano_final=9999 e mes_final=9999
+              - Ou se (ano_final*100 + mes_final) >= competência atual (ano*100+mes)
+              - Caso contrário, encerrada
+            """
+            client = get_bq_client_hab()
 
-        extra_params = list(params) + [
-            bigquery.ScalarQueryParameter("comp_atual", "INT64", int(comp_atual))
-        ]
+            hoje = pd.Timestamp.today()
+            comp_atual = hoje.year * 100 + hoje.month
 
-        sql = f"""
-        WITH base AS (
-          SELECT
-            SAFE_CAST(habilitacao_ano_competencia_final AS INT64) AS ano_final,
-            SAFE_CAST(habilitacao_mes_competencia_final AS INT64) AS mes_final
-          FROM `{table_id}`
-          {where_sql}
-        ),
-        classif AS (
-          SELECT
-            CASE
-              WHEN ano_final = 9999 AND mes_final = 9999 THEN 'ativa'
-              WHEN ano_final IS NOT NULL AND mes_final IS NOT NULL
-                   AND (ano_final * 100 + mes_final) >= @comp_atual
-                THEN 'ativa'
-              ELSE 'encerrada'
-            END AS status
-          FROM base
-          WHERE ano_final IS NOT NULL AND mes_final IS NOT NULL
-        )
-        SELECT
-          SUM(CASE WHEN status = 'ativa' THEN 1 ELSE 0 END) AS total_ativas,
-          SUM(CASE WHEN status = 'encerrada' THEN 1 ELSE 0 END) AS total_encerradas
-        FROM classif
-        """
+            extra_params = list(params) + [
+                bigquery.ScalarQueryParameter("comp_atual", "INT64", int(comp_atual))
+            ]
 
-        job = client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=extra_params),
-        )
-        df = job.to_dataframe()
-        if df.empty:
-            return 0, 0
-        row = df.iloc[0]
-        return int(row["total_ativas"] or 0), int(row["total_encerradas"] or 0)
+            sql = f"""
+            WITH base AS (
+              SELECT
+                SAFE_CAST(habilitacao_ano_competencia_final AS INT64) AS ano_final,
+                SAFE_CAST(habilitacao_mes_competencia_final AS INT64) AS mes_final
+              FROM `{table_id}`
+              {where_sql}
+            ),
+            classif AS (
+              SELECT
+                CASE
+                  WHEN ano_final = 9999 AND mes_final = 9999 THEN 'ativa'
+                  WHEN ano_final IS NOT NULL AND mes_final IS NOT NULL
+                       AND (ano_final * 100 + mes_final) >= @comp_atual
+                    THEN 'ativa'
+                  ELSE 'encerrada'
+                END AS status
+              FROM base
+              WHERE ano_final IS NOT NULL AND mes_final IS NOT NULL
+            )
+            SELECT
+              SUM(CASE WHEN status = 'ativa' THEN 1 ELSE 0 END) AS total_ativas,
+              SUM(CASE WHEN status = 'encerrada' THEN 1 ELSE 0 END) AS total_encerradas
+            FROM classif
+            """
 
-    # ---------------------------------------------------------
-    # Detalhe (tabela descritiva) – BigQuery com LIMIT
-    # ---------------------------------------------------------
-    def query_hab_detalhe(
-        where_sql: str,
-        params,
-        table_id: str,
-        cols: list[str],
-        limit_rows: int = 5000,
-    ) -> pd.DataFrame:
-        """
-        Busca dados detalhados das habilitações com os filtros aplicados,
-        limitado a `limit_rows` para exibição/CSV.
-        """
-        if not cols:
-            return pd.DataFrame()
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=extra_params),
+            )
+            df = job.to_dataframe()
+            if df.empty:
+                return 0, 0
+            row = df.iloc[0]
+            return int(row["total_ativas"] or 0), int(row["total_encerradas"] or 0)
 
-        client = get_bq_client_hab()
-        cols_sql = ", ".join(cols)
+        # -----------------------------------------------------
+        # Tabela descritiva (BigQuery com LIMIT)
+        # -----------------------------------------------------
+        def query_hab_detalhe(
+            where_sql: str,
+            params,
+            table_id: str,
+            cols: list[str],
+            limit_rows: int = 5000,
+        ) -> pd.DataFrame:
+            """
+            Busca dados detalhados das habilitações com os filtros aplicados,
+            limitado a `limit_rows` para exibição/CSV.
+            """
+            if not cols:
+                return pd.DataFrame()
 
-        sql = f"""
-        SELECT
-          {cols_sql}
-        FROM `{table_id}`
-        {where_sql}
-        LIMIT {limit_rows}
-        """
+            client = get_bq_client_hab()
+            cols_sql = ", ".join(cols)
 
-        job = client.query(
-            sql,
-            job_config=bigquery.QueryJobConfig(query_parameters=params),
-        )
-        return job.to_dataframe()
+            sql = f"""
+            SELECT
+              {cols_sql}
+            FROM `{table_id}`
+            {where_sql}
+            LIMIT {limit_rows}
+            """
 
-    # ---------------------------------------------------------
-    # Opções dos filtros (DISTINCT no BigQuery)
-    # ---------------------------------------------------------
-    @st.cache_data(show_spinner=False)
-    def _opts_hab(col: str) -> list[str]:
-        """
-        Busca valores distintos de uma coluna na tabela de habilitações.
-        Usado só para montar as opções dos filtros (sem aplicar WHERE).
-        """
-        client = get_bq_client_hab()
-        sql = f"""
-        SELECT DISTINCT CAST({col} AS STRING) AS val
-        FROM `{hab_table_id}`
-        WHERE {col} IS NOT NULL
-        ORDER BY val
-        """
-        try:
-            df = client.query(sql).to_dataframe()
-            return df["val"].dropna().tolist()
-        except Exception:
-            # Em caso de erro (ex: coluna não existe), volta lista vazia
-            return []
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # -----------------------------------------------------
+        # Opções dos filtros (DISTINCT no BigQuery)
+        # -----------------------------------------------------
+        @st.cache_data(show_spinner=False)
+        def _opts_hab(col: str) -> list[str]:
+            """
+            Busca valores distintos de uma coluna na tabela de habilitações.
+            Usado só para montar as opções dos filtros (sem aplicar WHERE).
+            """
+            client = get_bq_client_hab()
+            sql = f"""
+            SELECT DISTINCT CAST({col} AS STRING) AS val
+            FROM `{hab_table_id}`
+            WHERE {col} IS NOT NULL
+            ORDER BY val
+            """
+            try:
+                df = client.query(sql).to_dataframe()
+                return df["val"].dropna().tolist()
+            except Exception:
+                # Em caso de erro (ex: coluna não existe), volta lista vazia
+                return []
+
+        # -----------------------------------------------------
+        # Carregar todas as opções de filtros de uma vez
+        # -----------------------------------------------------
+        opts = {
+            # Período
+            "ano_hab": _opts_hab("habilitacao_ano"),
+            "mes_hab": _opts_hab("habilitacao_mes"),
+            "ano_comp_ini": _opts_hab("habilitacao_ano_competencia_inicial"),
+            "mes_comp_ini": _opts_hab("habilitacao_mes_competencia_inicial"),
+            "ano_comp_fim": _opts_hab("habilitacao_ano_competencia_final"),
+            "mes_comp_fim": _opts_hab("habilitacao_mes_competencia_final"),
+            "ano_portaria": _opts_hab("habilitacao_ano_portaria"),
+            "mes_portaria": _opts_hab("habilitacao_mes_portaria"),
+
+            # Território
+            "uf": _opts_hab("ibge_no_uf"),
+            "reg_saude": _opts_hab("ibge_no_regiao_saude"),
+            "meso": _opts_hab("ibge_no_mesorregiao"),
+            "micro": _opts_hab("ibge_no_microrregiao"),
+            "mun": _opts_hab("ibge_no_municipio"),
+            "ivs": _opts_hab("ibge_ivs"),
+
+            # Perfil do estabelecimento
+            "tipo_novo": _opts_hab("estabelecimentos_tipo_novo_do_estabelecimento"),
+            "subtipo": _opts_hab("estabelecimentos_subtipo_do_estabelecimento"),
+            "gestao": _opts_hab("estabelecimentos_gestao"),
+            "convenio": _opts_hab("estabelecimentos_convenio_sus"),
+            "nat_jur": _opts_hab("estabelecimentos_categoria_natureza_juridica"),
+            "status": _opts_hab("estabelecimentos_status_do_estabelecimento"),
+
+            # Habilitação
+            "nivel_tipo": _opts_hab("habilitacao_nivel_habilitacao_tipo"),
+            "cat_hab": _opts_hab("referencia_habilitacao_no_categoria"),
+            "no_hab": _opts_hab("referencia_habilitacao_no_habilitacao"),
+            "tag_hab": _opts_hab("referencia_habilitacao_ds_tag"),
+        }
 
     # =========================================================
     # SIDEBAR DE FILTROS
@@ -2283,52 +2353,52 @@ elif aba == "✅ Habilitação":
         with st.expander("Filtros de Período", expanded=False):
             ano_hab_sel = st.multiselect(
                 "Ano da habilitação",
-                _opts_hab("habilitacao_ano"),
+                opts["ano_hab"],
                 key="hab_ano",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_hab_sel = st.multiselect(
                 "Mês da habilitação",
-                _opts_hab("habilitacao_mes"),
+                opts["mes_hab"],
                 key="hab_mes",
                 placeholder="(Todos. Filtros opcionais)",
             )
 
             ano_comp_ini_sel = st.multiselect(
                 "Ano competência inicial",
-                _opts_hab("habilitacao_ano_competencia_inicial"),
+                opts["ano_comp_ini"],
                 key="hab_ano_comp_ini",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_comp_ini_sel = st.multiselect(
                 "Mês competência inicial",
-                _opts_hab("habilitacao_mes_competencia_inicial"),
+                opts["mes_comp_ini"],
                 key="hab_mes_comp_ini",
                 placeholder="(Todos. Filtros opcionais)",
             )
 
             ano_comp_fim_sel = st.multiselect(
                 "Ano competência final",
-                _opts_hab("habilitacao_ano_competencia_final"),
+                opts["ano_comp_fim"],
                 key="hab_ano_comp_fim",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_comp_fim_sel = st.multiselect(
                 "Mês competência final",
-                _opts_hab("habilitacao_mes_competencia_final"),
+                opts["mes_comp_fim"],
                 key="hab_mes_comp_fim",
                 placeholder="(Todos. Filtros opcionais)",
             )
 
             ano_portaria_sel = st.multiselect(
                 "Ano da portaria",
-                _opts_hab("habilitacao_ano_portaria"),
+                opts["ano_portaria"],
                 key="hab_ano_portaria",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_portaria_sel = st.multiselect(
                 "Mês da portaria",
-                _opts_hab("habilitacao_mes_portaria"),
+                opts["mes_portaria"],
                 key="hab_mes_portaria",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2337,37 +2407,37 @@ elif aba == "✅ Habilitação":
         with st.expander("Filtros de Território", expanded=False):
             uf_sel = st.multiselect(
                 "UF",
-                _opts_hab("ibge_no_uf"),
+                opts["uf"],
                 key="hab_uf",
                 placeholder="(Todos. Filtros opcionais)",
             )
             reg_saude_sel = st.multiselect(
                 "Região de Saúde",
-                _opts_hab("ibge_no_regiao_saude"),
+                opts["reg_saude"],
                 key="hab_reg_saude",
                 placeholder="(Todos. Filtros opcionais)",
             )
             meso_sel = st.multiselect(
                 "Mesorregião",
-                _opts_hab("ibge_no_mesorregiao"),
+                opts["meso"],
                 key="hab_meso",
                 placeholder="(Todos. Filtros opcionais)",
             )
             micro_sel = st.multiselect(
                 "Microrregião",
-                _opts_hab("ibge_no_microrregiao"),
+                opts["micro"],
                 key="hab_micro",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mun_sel = st.multiselect(
                 "Município",
-                _opts_hab("ibge_no_municipio"),
+                opts["mun"],
                 key="hab_mun",
                 placeholder="(Todos. Filtros opcionais)",
             )
             ivs_sel = st.multiselect(
                 "Município IVS",
-                _opts_hab("ibge_ivs"),
+                opts["ivs"],
                 key="hab_ivs",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2376,37 +2446,37 @@ elif aba == "✅ Habilitação":
         with st.expander("Filtros de Perfil do Estabelecimento", expanded=False):
             tipo_novo_sel = st.multiselect(
                 "Tipo",
-                _opts_hab("estabelecimentos_tipo_novo_do_estabelecimento"),
+                opts["tipo_novo"],
                 key="hab_tipo_novo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             subtipo_sel = st.multiselect(
                 "Subtipo",
-                _opts_hab("estabelecimentos_subtipo_do_estabelecimento"),
+                opts["subtipo"],
                 key="hab_subtipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             gestao_sel = st.multiselect(
                 "Gestão",
-                _opts_hab("estabelecimentos_gestao"),
+                opts["gestao"],
                 key="hab_gestao",
                 placeholder="(Todos. Filtros opcionais)",
             )
             convenio_sel = st.multiselect(
                 "Convênio SUS",
-                _opts_hab("estabelecimentos_convenio_sus"),
+                opts["convenio"],
                 key="hab_convenio",
                 placeholder="(Todos. Filtros opcionais)",
             )
             nat_jur_sel = st.multiselect(
                 "Natureza jurídica",
-                _opts_hab("estabelecimentos_categoria_natureza_juridica"),
+                opts["nat_jur"],
                 key="hab_natjur",
                 placeholder="(Todos. Filtros opcionais)",
             )
             status_sel = st.multiselect(
                 "Status",
-                _opts_hab("estabelecimentos_status_do_estabelecimento"),
+                opts["status"],
                 key="hab_status",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2415,25 +2485,25 @@ elif aba == "✅ Habilitação":
         with st.expander("Filtros de Habilitação", expanded=False):
             nivel_tipo_sel = st.multiselect(
                 "Nível/Tipo de habilitação",
-                _opts_hab("habilitacao_nivel_habilitacao_tipo"),
+                opts["nivel_tipo"],
                 key="hab_nivel_tipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             cat_hab_sel = st.multiselect(
                 "Categoria da habilitação",
-                _opts_hab("referencia_habilitacao_no_categoria"),
+                opts["cat_hab"],
                 key="hab_categoria",
                 placeholder="(Todos. Filtros opcionais)",
             )
             no_hab_sel = st.multiselect(
                 "Descrição da habilitação",
-                _opts_hab("referencia_habilitacao_no_habilitacao"),
+                opts["no_hab"],
                 key="hab_nome_hab",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tag_hab_sel = st.multiselect(
                 "Tag (agrupador)",
-                _opts_hab("referencia_habilitacao_ds_tag"),
+                opts["tag_hab"],
                 key="hab_tag",
                 placeholder="(Todos. Filtros opcionais)",
             )
