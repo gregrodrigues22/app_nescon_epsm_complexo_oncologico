@@ -4413,16 +4413,489 @@ elif aba == "👩‍⚕️ Profissionais":
     st.subheader("👩‍⚕️ Profissionais")
 
     # ---------------------------------------------------------
-    # Carregar dados
+    # Inicialização: BigQuery + opções de filtros (com spinner)
     # ---------------------------------------------------------
     with st.spinner("⏳ Carregando base de profissionais..."):
-        df_prof = load_table(TABLES["profissionais"]).copy()
 
-    # Helper local para opções dos filtros
-    def _opts_prof(col: str):
-        if col not in df_prof:
-            return []
-        return sorted(df_prof[col].dropna().unique())
+        import pandas as pd
+        from google.cloud import bigquery
+
+        prof_table_id = TABLES["profissionais"]
+
+        # ----------------------- Cliente BQ -------------------
+        @st.cache_resource
+        def get_bq_client_prof():
+            return bigquery.Client()
+
+        client_prof = get_bq_client_prof()
+        # Colunas existentes na tabela (para montar cols_ok depois)
+        try:
+            _tbl_prof = client_prof.get_table(prof_table_id)
+            prof_existing_cols = [f.name for f in _tbl_prof.schema]
+        except Exception:
+            prof_existing_cols = []
+
+        # ----------------------- WHERE dinâmico ---------------
+        def build_where_prof(
+            ano_sel,
+            mes_sel,
+            uf_sel,
+            reg_saude_sel,
+            meso_sel,
+            micro_sel,
+            mun_sel,
+            ivs_sel,
+            # perfil estab
+            tipo_novo_sel,
+            tipo_sel,
+            subtipo_sel,
+            gestao_sel,
+            convenio_sel,
+            natureza_sel,
+            status_sel,
+            # perfil profissional
+            cbo_sel,
+            cbo_saude_sel,
+            tipo_cbo_sel,
+            tipo_ras_sel,
+            tipo_esp_sel,
+            tipo_grupo_sel,
+            cons_tipo_sel,
+            vinculo_tipo_sel,
+            # indicadores vínculo / SUS (inteiros)
+            ind_terceiro_sel,
+            ind_contrat_sus_sel,
+            ind_autonomo_sus_sel,
+            ind_outros_sel,
+            ind_atende_sus_sel,
+            ind_atende_nao_sus_sel,
+            # complexos / onco (booleanos)
+            onco_cacon_sel,
+            onco_unacon_sel,
+            onco_radio_sel,
+            onco_quimio_sel,
+            hab_onco_cir_sel,
+            uti_adulto_sel,
+            uti_ped_sel,
+            uti_neo_sel,
+            uti_cor_sel,
+            ucin_sel,
+            uti_queim_sel,
+            caps_psiq_sel,
+            rehab_cer_sel,
+            cardio_ac_sel,
+            nutricao_sel,
+            odonto_ceo_sel,
+        ):
+            """
+            Monta WHERE dinâmico + parâmetros BigQuery
+            para todos os filtros da aba Profissionais.
+            """
+            clauses = ["1=1"]
+            params: list[bigquery.QueryParameter] = []
+
+            def add_in_array(col: str, param_name: str, values):
+                if values:
+                    vals = [str(v) for v in values]
+                    clauses.append(f"CAST({col} AS STRING) IN UNNEST(@{param_name})")
+                    params.append(
+                        bigquery.ArrayQueryParameter(param_name, "STRING", vals)
+                    )
+
+            def add_indicator(col: str, param_name: str, values):
+                """
+                Filtros de indicadores inteiros (0/1,…), com opções 'Sim'/'Não'.
+                """
+                if not values:
+                    return
+                allowed = []
+                if "Sim" in values:
+                    allowed.append(1)
+                if "Não" in values:
+                    allowed.append(0)
+                if not allowed:
+                    return
+                clauses.append(
+                    f"SAFE_CAST({col} AS INT64) IN UNNEST(@{param_name})"
+                )
+                params.append(
+                    bigquery.ArrayQueryParameter(param_name, "INT64", allowed)
+                )
+
+            def add_bool(col: str, param_name: str, values):
+                """
+                Booleanos verdadeiros (onco / complexos), tratados como 0/1 ou BOOL.
+                """
+                if not values:
+                    return
+                allowed = []
+                if "Sim" in values:
+                    allowed.append(1)
+                if "Não" in values:
+                    allowed.append(0)
+                if not allowed:
+                    return
+                clauses.append(
+                    f"SAFE_CAST({col} AS INT64) IN UNNEST(@{param_name})"
+                )
+                params.append(
+                    bigquery.ArrayQueryParameter(param_name, "INT64", allowed)
+                )
+
+            # Período / território
+            add_in_array("profissionais_ano", "ano", ano_sel)
+            add_in_array("profissionais_mes", "mes", mes_sel)
+            add_in_array("ibge_no_uf", "uf", uf_sel)
+            add_in_array("ibge_no_regiao_saude", "reg_saude", reg_saude_sel)
+            add_in_array("ibge_no_mesorregiao", "meso", meso_sel)
+            add_in_array("ibge_no_microrregiao", "micro", micro_sel)
+            add_in_array("ibge_no_municipio", "mun", mun_sel)
+            add_in_array("ibge_ivs", "ivs", ivs_sel)
+
+            # Perfil Estabelecimento
+            add_in_array(
+                "estabelecimentos_tipo_novo_do_estabelecimento",
+                "tipo_novo",
+                tipo_novo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_tipo_do_estabelecimento",
+                "tipo",
+                tipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_subtipo_do_estabelecimento",
+                "subtipo",
+                subtipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_gestao",
+                "gestao",
+                gestao_sel,
+            )
+            add_in_array(
+                "estabelecimentos_convenio_sus",
+                "convenio",
+                convenio_sel,
+            )
+            add_in_array(
+                "estabelecimentos_categoria_natureza_juridica",
+                "natureza",
+                natureza_sel,
+            )
+            add_in_array(
+                "estabelecimentos_status_do_estabelecimento",
+                "status_estab",
+                status_sel,
+            )
+
+            # Perfil Profissional
+            add_in_array("cbo_descricao", "cbo_desc", cbo_sel)
+            add_in_array("cbo_saude", "cbo_saude", cbo_saude_sel)
+            add_in_array(
+                "profissionais_tipo_cbo",
+                "tipo_cbo",
+                tipo_cbo_sel,
+            )
+            add_in_array(
+                "profissionais_tipo_ras",
+                "tipo_ras",
+                tipo_ras_sel,
+            )
+            add_in_array(
+                "profissionais_tipo_especialidade",
+                "tipo_esp",
+                tipo_esp_sel,
+            )
+            add_in_array(
+                "profissionais_tipo_grupo",
+                "tipo_grupo",
+                tipo_grupo_sel,
+            )
+            add_in_array(
+                "profissionais_tipo_conselho",
+                "tipo_conselho",
+                cons_tipo_sel,
+            )
+            add_in_array(
+                "profissionais_tipo_vinculo",
+                "tipo_vinc",
+                vinculo_tipo_sel,
+            )
+
+            # Indicadores de vínculo / SUS (inteiros)
+            add_indicator(
+                "profissionais_indicador_estabelecimento_terceiro",
+                "ind_terceiro",
+                ind_terceiro_sel,
+            )
+            add_indicator(
+                "profissionais_indicador_vinculo_contratado_sus",
+                "ind_contrat_sus",
+                ind_contrat_sus_sel,
+            )
+            add_indicator(
+                "profissionais_indicador_vinculo_autonomo_sus",
+                "ind_autonomo_sus",
+                ind_autonomo_sus_sel,
+            )
+            add_indicator(
+                "profissionais_indicador_vinculo_outros",
+                "ind_outros",
+                ind_outros_sel,
+            )
+            add_indicator(
+                "profissionais_indicador_atende_sus",
+                "ind_atende_sus",
+                ind_atende_sus_sel,
+            )
+            add_indicator(
+                "profissionais_indicador_atende_nao_sus",
+                "ind_atende_nao_sus",
+                ind_atende_nao_sus_sel,
+            )
+
+            # Complexos / Onco
+            add_bool("onco_cacon", "onco_cacon", onco_cacon_sel)
+            add_bool("onco_unacon", "onco_unacon", onco_unacon_sel)
+            add_bool("onco_radioterapia", "onco_radio", onco_radio_sel)
+            add_bool("onco_quimioterapia", "onco_quimio", onco_quimio_sel)
+            add_bool(
+                "habilitacao_agrupado_onco_cirurgica",
+                "onco_cir",
+                hab_onco_cir_sel,
+            )
+
+            add_bool("habilitacao_agrupado_uti_adulto", "uti_adulto", uti_adulto_sel)
+            add_bool("habilitacao_agrupado_uti_pediatrica", "uti_ped", uti_ped_sel)
+            add_bool("habilitacao_agrupado_uti_neonatal", "uti_neo", uti_neo_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_coronariana",
+                "uti_cor",
+                uti_cor_sel,
+            )
+            add_bool("habilitacao_agrupado_ucin", "ucin", ucin_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_queimados",
+                "uti_queim",
+                uti_queim_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_saude_mental_caps_psiq",
+                "caps_psiq",
+                caps_psiq_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_reabilitacao_cer",
+                "rehab_cer",
+                rehab_cer_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_cardio_alta_complex",
+                "cardio_ac",
+                cardio_ac_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_nutricao",
+                "nutricao",
+                nutricao_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_odontologia_ceo",
+                "odonto_ceo",
+                odonto_ceo_sel,
+            )
+
+            where_sql = "WHERE " + " AND ".join(clauses)
+            return where_sql, params
+
+        # ----------------------- KPIs -------------------------
+        def query_prof_kpis(where_sql: str, params, table_id: str):
+            """
+            KPIs direto do BigQuery:
+              - total_vinc (linhas)
+              - n_prof (profissionais distintos)
+              - carga_total
+              - carga_media_por_vinc
+            """
+            client = get_bq_client_prof()
+            sql = f"""
+            WITH base AS (
+              SELECT
+                profissionais_cartao_nacional_saude,
+                profissionais_id_registro_conselho,
+                COALESCE(CAST(profissionais_carga_horaria_outros AS FLOAT64), 0) AS carga_outros,
+                COALESCE(CAST(profissionais_carga_horaria_hospitalar AS FLOAT64), 0) AS carga_hosp,
+                COALESCE(CAST(profissionais_carga_horaria_ambulatorial AS FLOAT64), 0) AS carga_amb
+              FROM `{table_id}`
+              {where_sql}
+            ),
+            base2 AS (
+              SELECT
+                *,
+                (carga_outros + carga_hosp + carga_amb) AS carga_total_vinc,
+                COALESCE(NULLIF(profissionais_cartao_nacional_saude, ''), profissionais_id_registro_conselho) AS id_prof
+              FROM base
+            )
+            SELECT
+              (SELECT COUNT(*) FROM base2) AS total_vinc,
+              (SELECT COUNT(DISTINCT id_prof) FROM base2 WHERE id_prof IS NOT NULL) AS n_prof,
+              (SELECT SUM(carga_total_vinc) FROM base2) AS carga_total,
+              (SELECT AVG(carga_total_vinc) FROM base2) AS carga_media_por_vinc;
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            return df.iloc[0] if not df.empty else None
+
+        # ----------------------- Agregado por CBO -------------
+        def query_prof_group_cbo(where_sql: str, params, table_id: str):
+            client = get_bq_client_prof()
+            sql = f"""
+            SELECT
+              cbo_descricao,
+              COUNT(*) AS qtd_profissionais
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY cbo_descricao
+            HAVING cbo_descricao IS NOT NULL
+            ORDER BY qtd_profissionais DESC
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Agregado por Tipo RAS --------
+        def query_prof_group_ras(where_sql: str, params, table_id: str):
+            client = get_bq_client_prof()
+            sql = f"""
+            SELECT
+              profissionais_tipo_ras,
+              COUNT(*) AS qtd_profissionais
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY profissionais_tipo_ras
+            HAVING profissionais_tipo_ras IS NOT NULL
+            ORDER BY qtd_profissionais DESC
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Atende SUS x não SUS ---------
+        def query_prof_sus(where_sql: str, params, table_id: str):
+            client = get_bq_client_prof()
+            sql = f"""
+            SELECT
+              SUM(
+                CASE WHEN SAFE_CAST(profissionais_indicador_atende_sus AS FLOAT64) > 0
+                     THEN 1 ELSE 0 END
+              ) AS total_sus,
+              SUM(
+                CASE WHEN SAFE_CAST(profissionais_indicador_atende_nao_sus AS FLOAT64) > 0
+                     THEN 1 ELSE 0 END
+              ) AS total_nao_sus
+            FROM `{table_id}`
+            {where_sql}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            if df.empty:
+                return 0, 0
+            row = df.iloc[0]
+            return int(row["total_sus"] or 0), int(row["total_nao_sus"] or 0)
+
+        # ----------------------- Tabela detalhada ------------
+        def query_prof_detalhe(
+            where_sql: str,
+            params,
+            table_id: str,
+            cols: list[str],
+            limit_rows: int = 5000,
+        ) -> pd.DataFrame:
+            """
+            Busca dados detalhados dos profissionais com os filtros aplicados,
+            limitado a `limit_rows` para exibição/CSV.
+            """
+            if not cols:
+                return pd.DataFrame()
+            client = get_bq_client_prof()
+            cols_sql = ", ".join(cols)
+            sql = f"""
+            SELECT
+              {cols_sql}
+            FROM `{table_id}`
+            {where_sql}
+            LIMIT {limit_rows}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Opções de filtros (DISTINCT) -
+        @st.cache_data(show_spinner=False)
+        def _opts_prof(col: str) -> list[str]:
+            """
+            Busca valores distintos de uma coluna na tabela de profissionais.
+            Usado só para montar as opções dos filtros.
+            """
+            client = get_bq_client_prof()
+            sql = f"""
+            SELECT DISTINCT CAST({col} AS STRING) AS val
+            FROM `{prof_table_id}`
+            WHERE {col} IS NOT NULL
+            ORDER BY val
+            """
+            try:
+                df = client.query(sql).to_dataframe()
+                return df["val"].dropna().tolist()
+            except Exception:
+                return []
+
+        # ----------------------- Carregar todas as opções ----
+        opts = {
+            # Período
+            "ano": _opts_prof("profissionais_ano"),
+            "mes": _opts_prof("profissionais_mes"),
+
+            # Território
+            "uf": _opts_prof("ibge_no_uf"),
+            "reg_saude": _opts_prof("ibge_no_regiao_saude"),
+            "meso": _opts_prof("ibge_no_mesorregiao"),
+            "micro": _opts_prof("ibge_no_microrregiao"),
+            "mun": _opts_prof("ibge_no_municipio"),
+            "ivs": _opts_prof("ibge_ivs"),
+
+            # Perfil estabelecimento
+            "tipo_novo": _opts_prof("estabelecimentos_tipo_novo_do_estabelecimento"),
+            "tipo": _opts_prof("estabelecimentos_tipo_do_estabelecimento"),
+            "subtipo": _opts_prof("estabelecimentos_subtipo_do_estabelecimento"),
+            "gestao": _opts_prof("estabelecimentos_gestao"),
+            "convenio": _opts_prof("estabelecimentos_convenio_sus"),
+            "natureza": _opts_prof("estabelecimentos_categoria_natureza_juridica"),
+            "status": _opts_prof("estabelecimentos_status_do_estabelecimento"),
+
+            # Perfil profissional
+            "cbo_desc": _opts_prof("cbo_descricao"),
+            "cbo_saude": _opts_prof("cbo_saude"),
+            "tipo_cbo": _opts_prof("profissionais_tipo_cbo"),
+            "tipo_ras": _opts_prof("profissionais_tipo_ras"),
+            "tipo_esp": _opts_prof("profissionais_tipo_especialidade"),
+            "tipo_grupo": _opts_prof("profissionais_tipo_grupo"),
+            "tipo_conselho": _opts_prof("profissionais_tipo_conselho"),
+            "tipo_vinc": _opts_prof("profissionais_tipo_vinculo"),
+        }
 
     # =========================================================
     # SIDEBAR DE FILTROS
@@ -4436,13 +4909,13 @@ elif aba == "👩‍⚕️ Profissionais":
         with st.expander("Fitros de Período", expanded=False):
             ano_sel = st.multiselect(
                 "Ano",
-                _opts_prof("profissionais_ano"),
+                opts["ano"],
                 key="prof_ano",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_sel = st.multiselect(
                 "Mês",
-                _opts_prof("profissionais_mes"),
+                opts["mes"],
                 key="prof_mes",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -4451,37 +4924,37 @@ elif aba == "👩‍⚕️ Profissionais":
         with st.expander("Fitros de Território", expanded=False):
             uf_sel = st.multiselect(
                 "UF",
-                _opts_prof("ibge_no_uf"),
+                opts["uf"],
                 key="prof_uf",
                 placeholder="(Todos. Filtros opcionais)",
             )
             reg_saude_sel = st.multiselect(
                 "Região de Saúde",
-                _opts_prof("ibge_no_regiao_saude"),
+                opts["reg_saude"],
                 key="prof_regsaude",
                 placeholder="(Todos. Filtros opcionais)",
             )
             meso_sel = st.multiselect(
                 "Mesorregião",
-                _opts_prof("ibge_no_mesorregiao"),
+                opts["meso"],
                 key="prof_meso",
                 placeholder="(Todos. Filtros opcionais)",
             )
             micro_sel = st.multiselect(
                 "Microrregião",
-                _opts_prof("ibge_no_microrregiao"),
+                opts["micro"],
                 key="prof_micro",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mun_sel = st.multiselect(
                 "Município",
-                _opts_prof("ibge_no_municipio"),
+                opts["mun"],
                 key="prof_mun",
                 placeholder="(Todos. Filtros opcionais)",
             )
             ivs_sel = st.multiselect(
                 "Município IVS",
-                _opts_prof("ibge_ivs"),
+                opts["ivs"],
                 key="prof_ivs",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -4490,43 +4963,43 @@ elif aba == "👩‍⚕️ Profissionais":
         with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
             tipo_novo_sel = st.multiselect(
                 "Tipo (novo)",
-                _opts_prof("estabelecimentos_tipo_novo_do_estabelecimento"),
+                opts["tipo_novo"],
                 key="prof_tipo_novo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_sel = st.multiselect(
                 "Tipo do estabelecimento",
-                _opts_prof("estabelecimentos_tipo_do_estabelecimento"),
+                opts["tipo"],
                 key="prof_tipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             subtipo_sel = st.multiselect(
                 "Subtipo",
-                _opts_prof("estabelecimentos_subtipo_do_estabelecimento"),
+                opts["subtipo"],
                 key="prof_subtipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             gestao_sel = st.multiselect(
                 "Gestão",
-                _opts_prof("estabelecimentos_gestao"),
+                opts["gestao"],
                 key="prof_gestao",
                 placeholder="(Todos. Filtros opcionais)",
             )
             convenio_sel = st.multiselect(
                 "Convênio SUS",
-                _opts_prof("estabelecimentos_convenio_sus"),
+                opts["convenio"],
                 key="prof_convenio",
                 placeholder="(Todos. Filtros opcionais)",
             )
             natureza_sel = st.multiselect(
                 "Natureza Jurídica",
-                _opts_prof("estabelecimentos_categoria_natureza_juridica"),
+                opts["natureza"],
                 key="prof_natjur",
                 placeholder="(Todos. Filtros opcionais)",
             )
             status_sel = st.multiselect(
                 "Status",
-                _opts_prof("estabelecimentos_status_do_estabelecimento"),
+                opts["status"],
                 key="prof_status",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -4535,49 +5008,49 @@ elif aba == "👩‍⚕️ Profissionais":
         with st.expander("Filtros de Perfil Profissional", expanded=False):
             cbo_sel = st.multiselect(
                 "Ocupação (CBO descrição)",
-                _opts_prof("cbo_descricao"),
+                opts["cbo_desc"],
                 key="prof_cbo_desc",
                 placeholder="(Todos. Filtros opcionais)",
             )
             cbo_saude_sel = st.multiselect(
                 "CBO Saúde",
-                _opts_prof("cbo_saude"),
+                opts["cbo_saude"],
                 key="prof_cbo_saude",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_cbo_sel = st.multiselect(
                 "Tipo de CBO",
-                _opts_prof("profissionais_tipo_cbo"),
+                opts["tipo_cbo"],
                 key="prof_tipo_cbo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_ras_sel = st.multiselect(
                 "Tipo RAS",
-                _opts_prof("profissionais_tipo_ras"),
+                opts["tipo_ras"],
                 key="prof_tipo_ras",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_esp_sel = st.multiselect(
                 "Tipo de especialidade",
-                _opts_prof("profissionais_tipo_especialidade"),
+                opts["tipo_esp"],
                 key="prof_tipo_esp",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_grupo_sel = st.multiselect(
                 "Tipo de grupo",
-                _opts_prof("profissionais_tipo_grupo"),
+                opts["tipo_grupo"],
                 key="prof_tipo_grupo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             cons_tipo_sel = st.multiselect(
                 "Tipo de conselho",
-                _opts_prof("profissionais_tipo_conselho"),
+                opts["tipo_conselho"],
                 key="prof_tipo_conselho",
                 placeholder="(Todos. Filtros opcionais)",
             )
             vinculo_tipo_sel = st.multiselect(
                 "Tipo de vínculo",
-                _opts_prof("profissionais_tipo_vinculo"),
+                opts["tipo_vinc"],
                 key="prof_tipo_vinculo",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -4586,179 +5059,162 @@ elif aba == "👩‍⚕️ Profissionais":
         with st.expander("Filtros de Vínculo / SUS", expanded=False):
             def ind_multiselect(label, key):
                 return st.multiselect(
-                    label, ["Sim", "Não"], key=key,
+                    label,
+                    ["Sim", "Não"],
+                    key=key,
                     placeholder="(Todos. Filtros opcionais)",
                 )
 
-            ind_terceiro_sel = ind_multiselect("Estabelecimento terceiro", "prof_terceiro")
-            ind_contrat_sus_sel = ind_multiselect("Vínculo contratado SUS", "prof_contrat_sus")
-            ind_autonomo_sus_sel = ind_multiselect("Vínculo autônomo SUS", "prof_autonomo_sus")
+            ind_terceiro_sel = ind_multiselect(
+                "Estabelecimento terceiro", "prof_terceiro"
+            )
+            ind_contrat_sus_sel = ind_multiselect(
+                "Vínculo contratado SUS", "prof_contrat_sus"
+            )
+            ind_autonomo_sus_sel = ind_multiselect(
+                "Vínculo autônomo SUS", "prof_autonomo_sus"
+            )
             ind_outros_sel = ind_multiselect("Vínculo outros", "prof_vinc_outros")
             ind_atende_sus_sel = ind_multiselect("Atende SUS", "prof_atende_sus")
-            ind_atende_nao_sus_sel = ind_multiselect("Atende não SUS", "prof_atende_nao_sus")
+            ind_atende_nao_sus_sel = ind_multiselect(
+                "Atende não SUS", "prof_atende_nao_sus"
+            )
 
         # ------------- Complexos / Oncologia -----------
         with st.expander("Filtros de Complexos / Oncologia", expanded=False):
             def bool_multiselect(label, key):
                 return st.multiselect(
-                    label, ["Sim", "Não"], key=key,
+                    label,
+                    ["Sim", "Não"],
+                    key=key,
                     placeholder="(Todos. Filtros opcionais)",
                 )
 
-            onco_cacon_sel   = bool_multiselect("CACON",           "prof_onco_cacon")
-            onco_unacon_sel  = bool_multiselect("UNACON",          "prof_onco_unacon")
-            onco_radio_sel   = bool_multiselect("Radioterapia",    "prof_onco_radio")
-            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "prof_onco_quimio")
-            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "prof_onco_cir")
+            onco_cacon_sel = bool_multiselect("CACON", "prof_onco_cacon")
+            onco_unacon_sel = bool_multiselect("UNACON", "prof_onco_unacon")
+            onco_radio_sel = bool_multiselect("Radioterapia", "prof_onco_radio")
+            onco_quimio_sel = bool_multiselect("Quimioterapia", "prof_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica", "prof_onco_cir")
 
-            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "prof_uti_adulto")
-            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "prof_uti_ped")
-            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "prof_uti_neo")
-            uti_cor_sel      = bool_multiselect("UTI Coronariana", "prof_uti_cor")
-            ucin_sel         = bool_multiselect("UCIN",            "prof_ucin")
-            uti_queim_sel    = bool_multiselect("UTI Queimados",   "prof_uti_queim")
-            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "prof_caps_psiq")
-            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "prof_rehab_cer")
-            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "prof_cardio_ac")
-            nutricao_sel     = bool_multiselect("Nutrição",              "prof_nutricao")
-            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "prof_odonto_ceo")
-
-    # =========================================================
-    # Aplicação dos filtros
-    # =========================================================
-    dfp = df_prof.copy()
-
-    def apply_multisel(df, col, sel):
-        if sel and col in df:
-            return df[df[col].isin(sel)]
-        return df
-
-    # Inteiros 1/0 -> booleanos "Sim/Não"
-    def apply_indicator(df, col, sel):
-        if not sel or col not in df:
-            return df
-        bool_series = df[col].fillna(0).astype(int) > 0
-        allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
-        mask = bool_series.isin(allowed)
-        return df[mask]
-
-    # Booleanos puros
-    def apply_bool(df, col, sel):
-        if not sel or col not in df:
-            return df
-        allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
-        return df[df[col].astype("boolean").isin(allowed)]
-
-    # Período / território
-    dfp = apply_multisel(dfp, "profissionais_ano", ano_sel)
-    dfp = apply_multisel(dfp, "profissionais_mes", mes_sel)
-    dfp = apply_multisel(dfp, "ibge_no_uf",        uf_sel)
-    dfp = apply_multisel(dfp, "ibge_no_regiao_saude", reg_saude_sel)
-    dfp = apply_multisel(dfp, "ibge_no_mesorregiao",  meso_sel)
-    dfp = apply_multisel(dfp, "ibge_no_microrregiao", micro_sel)
-    dfp = apply_multisel(dfp, "ibge_no_municipio",    mun_sel)
-    dfp = apply_multisel(dfp, "ibge_ivs",             ivs_sel)
-
-    # Perfil Estabelecimento
-    dfp = apply_multisel(dfp, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_gestao",                       gestao_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_convenio_sus",                 convenio_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
-    dfp = apply_multisel(dfp, "estabelecimentos_status_do_estabelecimento",    status_sel)
-
-    # Perfil Profissional
-    dfp = apply_multisel(dfp, "cbo_descricao",                cbo_sel)
-    dfp = apply_multisel(dfp, "cbo_saude",                    cbo_saude_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_cbo",       tipo_cbo_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_ras",       tipo_ras_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_especialidade", tipo_esp_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_grupo",     tipo_grupo_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_conselho",  cons_tipo_sel)
-    dfp = apply_multisel(dfp, "profissionais_tipo_vinculo",   vinculo_tipo_sel)
-
-    # Indicadores de vínculo / SUS (inteiros)
-    dfp = apply_indicator(dfp, "profissionais_indicador_estabelecimento_terceiro",      ind_terceiro_sel)
-    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_contratado_sus",        ind_contrat_sus_sel)
-    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_autonomo_sus",          ind_autonomo_sus_sel)
-    dfp = apply_indicator(dfp, "profissionais_indicador_vinculo_outros",                ind_outros_sel)
-    dfp = apply_indicator(dfp, "profissionais_indicador_atende_sus",                    ind_atende_sus_sel)
-    dfp = apply_indicator(dfp, "profissionais_indicador_atende_nao_sus",                ind_atende_nao_sus_sel)
-
-    # Complexos / Onco
-    dfp = apply_bool(dfp, "onco_cacon",                          onco_cacon_sel)
-    dfp = apply_bool(dfp, "onco_unacon",                         onco_unacon_sel)
-    dfp = apply_bool(dfp, "onco_radioterapia",                   onco_radio_sel)
-    dfp = apply_bool(dfp, "onco_quimioterapia",                  onco_quimio_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
-
-    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_ucin",           ucin_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_nutricao",                nutricao_sel)
-    dfp = apply_bool(dfp, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
-
-    # Se depois dos filtros não sobrar nada, aborta o resto
-    if dfp.empty:
-        st.warning("Nenhum profissional encontrado com os filtros selecionados.")
-        st.stop()
+            uti_adulto_sel = bool_multiselect("UTI Adulto", "prof_uti_adulto")
+            uti_ped_sel = bool_multiselect("UTI Pediátrica", "prof_uti_ped")
+            uti_neo_sel = bool_multiselect("UTI Neonatal", "prof_uti_neo")
+            uti_cor_sel = bool_multiselect("UTI Coronariana", "prof_uti_cor")
+            ucin_sel = bool_multiselect("UCIN", "prof_ucin")
+            uti_queim_sel = bool_multiselect("UTI Queimados", "prof_uti_queim")
+            caps_psiq_sel = bool_multiselect(
+                "Saúde Mental CAPS/Psiq", "prof_caps_psiq"
+            )
+            rehab_cer_sel = bool_multiselect("Reabilitação CER", "prof_rehab_cer")
+            cardio_ac_sel = bool_multiselect(
+                "Cardio Alta Complex.", "prof_cardio_ac"
+            )
+            nutricao_sel = bool_multiselect("Nutrição", "prof_nutricao")
+            odonto_ceo_sel = bool_multiselect(
+                "Odontologia CEO", "prof_odonto_ceo"
+            )
 
     # =========================================================
-    # METRIC CARDS
+    # Detectar mudanças de filtros + WHERE/params
     # =========================================================
-    st.info("📏 Grandes números: visão rápida dos profissionais filtrados")
+    filter_values = {
+        "ano": ano_sel,
+        "mes": mes_sel,
+        "uf": uf_sel,
+        "reg_saude": reg_saude_sel,
+        "meso": meso_sel,
+        "micro": micro_sel,
+        "mun": mun_sel,
+        "ivs": ivs_sel,
+        "tipo_novo": tipo_novo_sel,
+        "tipo": tipo_sel,
+        "subtipo": subtipo_sel,
+        "gestao": gestao_sel,
+        "convenio": convenio_sel,
+        "natureza": natureza_sel,
+        "status": status_sel,
+        "cbo": cbo_sel,
+        "cbo_saude": cbo_saude_sel,
+        "tipo_cbo": tipo_cbo_sel,
+        "tipo_ras": tipo_ras_sel,
+        "tipo_esp": tipo_esp_sel,
+        "tipo_grupo": tipo_grupo_sel,
+        "tipo_conselho": cons_tipo_sel,
+        "tipo_vinc": vinculo_tipo_sel,
+        "ind_terceiro": ind_terceiro_sel,
+        "ind_contrat_sus": ind_contrat_sus_sel,
+        "ind_autonomo_sus": ind_autonomo_sus_sel,
+        "ind_outros": ind_outros_sel,
+        "ind_atende_sus": ind_atende_sus_sel,
+        "ind_atende_nao_sus": ind_atende_nao_sus_sel,
+        "onco_cacon": onco_cacon_sel,
+        "onco_unacon": onco_unacon_sel,
+        "onco_radio": onco_radio_sel,
+        "onco_quimio": onco_quimio_sel,
+        "hab_onco_cir": hab_onco_cir_sel,
+        "uti_adulto": uti_adulto_sel,
+        "uti_ped": uti_ped_sel,
+        "uti_neo": uti_neo_sel,
+        "uti_cor": uti_cor_sel,
+        "ucin": ucin_sel,
+        "uti_queim": uti_queim_sel,
+        "caps_psiq": caps_psiq_sel,
+        "rehab_cer": rehab_cer_sel,
+        "cardio_ac": cardio_ac_sel,
+        "nutricao": nutricao_sel,
+        "odonto_ceo": odonto_ceo_sel,
+    }
 
-    col1, col2, col3, col4 = st.columns(4)
+    filters_changed = any(did_filters_change(k, v) for k, v in filter_values.items())
+    spinner = st.spinner("⏳ Atualizando resultados…") if filters_changed else DummySpinner()
 
-    with col1:
-        total_vinc = dfp.shape[0]
-        st.metric("Total de vínculos de profissionais", fmt_num(total_vinc))
-
-    with col2:
-        # Profissionais distintos por CNS ou registro conselho
-        if "profissionais_cartao_nacional_saude" in dfp.columns:
-            n_prof = dfp["profissionais_cartao_nacional_saude"].nunique()
-        elif "profissionais_id_registro_conselho" in dfp.columns:
-            n_prof = dfp["profissionais_id_registro_conselho"].nunique()
-        else:
-            n_prof = dfp.shape[0]
-        st.metric("Profissionais distintos (aprox.)", fmt_num(n_prof))
-
-    with col3:
-        carga_cols = [
-            c for c in [
-                "profissionais_carga_horaria_outros",
-                "profissionais_carga_horaria_hospitalar",
-                "profissionais_carga_horaria_ambulatorial",
-            ] if c in dfp.columns
-        ]
-        if carga_cols:
-            carga_total = dfp[carga_cols].sum(axis=1).sum()
-            st.metric("Carga horária total (somada)", fmt_num(carga_total))
-        else:
-            st.metric("Carga horária total (somada)", "-")
-
-    with col4:
-        if carga_cols and total_vinc > 0:
-            carga_media = carga_total / total_vinc
-            st.metric("Carga horária média por vínculo", f"{carga_media:,.1f}".replace(",", "."))
-        else:
-            st.metric("Carga horária média por vínculo", "-")
+    where_sql_prof, bq_params_prof = build_where_prof(
+        ano_sel,
+        mes_sel,
+        uf_sel,
+        reg_saude_sel,
+        meso_sel,
+        micro_sel,
+        mun_sel,
+        ivs_sel,
+        tipo_novo_sel,
+        tipo_sel,
+        subtipo_sel,
+        gestao_sel,
+        convenio_sel,
+        natureza_sel,
+        status_sel,
+        cbo_sel,
+        cbo_saude_sel,
+        tipo_cbo_sel,
+        tipo_ras_sel,
+        tipo_esp_sel,
+        tipo_grupo_sel,
+        cons_tipo_sel,
+        vinculo_tipo_sel,
+        ind_terceiro_sel,
+        ind_contrat_sus_sel,
+        ind_autonomo_sus_sel,
+        ind_outros_sel,
+        ind_atende_sus_sel,
+        ind_atende_nao_sus_sel,
+        onco_cacon_sel,
+        onco_unacon_sel,
+        onco_radio_sel,
+        onco_quimio_sel,
+        hab_onco_cir_sel,
+        uti_adulto_sel,
+        uti_ped_sel,
+        uti_neo_sel,
+        uti_cor_sel,
+        ucin_sel,
+        uti_queim_sel,
+        caps_psiq_sel,
+        rehab_cer_sel,
+        cardio_ac_sel,
+        nutricao_sel,
+        odonto_ceo_sel,
+    )
 
     # =========================================================
     # Função helper para limitar categorias nos gráficos
@@ -4774,154 +5230,202 @@ elif aba == "👩‍⚕️ Profissionais":
         df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
         return df2
 
-    # ============================================================
-    # 📊 GRÁFICOS
-    # ============================================================
-    st.info("📊 Gráficos — resumo visual dos profissionais filtrados")
+    # =========================================================
+    # BLOCO PRINCIPAL COM SPINNER DE RESULTADOS
+    # =========================================================
+    with spinner:
+        # ======================== KPIs =======================
+        st.info("📏 Grandes números: visão rápida dos profissionais filtrados")
 
-    # 1) Profissionais por CBO (descrição)
-    with st.expander("Profissionais por ocupação (CBO descrição)", expanded=True):
-        if "cbo_descricao" in dfp.columns:
-            df_cbo = (
-                dfp.groupby("cbo_descricao")
-                   .size()
-                   .reset_index(name="qtd_profissionais")
+        kpis_prof = query_prof_kpis(where_sql_prof, bq_params_prof, prof_table_id)
+
+        if kpis_prof is None or (kpis_prof["total_vinc"] or 0) == 0:
+            st.warning("Nenhum profissional encontrado com os filtros selecionados.")
+            st.stop()
+
+        total_vinc = int(kpis_prof["total_vinc"] or 0)
+        n_prof = int(kpis_prof["n_prof"] or 0)
+        carga_total = float(kpis_prof["carga_total"] or 0)
+        carga_media = float(kpis_prof["carga_media_por_vinc"] or 0)
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Total de vínculos de profissionais", fmt_num(total_vinc))
+
+        with col2:
+            st.metric("Profissionais distintos (aprox.)", fmt_num(n_prof))
+
+        with col3:
+            st.metric("Carga horária total (somada)", fmt_num(carga_total))
+
+        with col4:
+            st.metric(
+                "Carga horária média por vínculo",
+                f"{carga_media:,.1f}".replace(",", "."),
             )
-            df_cbo = df_cbo.sort_values("qtd_profissionais", ascending=False)
-            df_cbo = col_top_n(df_cbo, "cbo_descricao", top_n=40)
 
-            fig_cbo = bar_total_por_grupo(
-                df_cbo,
-                grupo_col="cbo_descricao",
-                valor_col="qtd_profissionais",
-                titulo="Distribuição de vínculos por ocupação (CBO)",
-                x_label="Quantidade de vínculos",
-                y_label="Ocupação (CBO)",
-                orientation="h",
+        # ======================== GRÁFICOS ====================
+        st.info("📊 Gráficos — resumo visual dos profissionais filtrados")
+
+        # 1) Profissionais por CBO (descrição)
+        with st.expander("Profissionais por ocupação (CBO descrição)", expanded=True):
+            df_cbo = query_prof_group_cbo(
+                where_sql_prof, bq_params_prof, prof_table_id
             )
-            st.plotly_chart(fig_cbo, use_container_width=True)
-        else:
-            st.info("Coluna `cbo_descricao` não está disponível na base filtrada.")
+            if not df_cbo.empty:
+                df_cbo = df_cbo.sort_values("qtd_profissionais", ascending=False)
+                df_cbo = col_top_n(df_cbo, "cbo_descricao", top_n=40)
 
-    # 2) Profissionais por tipo RAS
-    with st.expander("Distribuição por Tipo RAS", expanded=False):
-        if "profissionais_tipo_ras" in dfp.columns:
-            df_ras = (
-                dfp.groupby("profissionais_tipo_ras")
-                   .size()
-                   .reset_index(name="qtd_profissionais")
+                fig_cbo = bar_total_por_grupo(
+                    df_cbo,
+                    grupo_col="cbo_descricao",
+                    valor_col="qtd_profissionais",
+                    titulo="Distribuição de vínculos por ocupação (CBO)",
+                    x_label="Quantidade de vínculos",
+                    y_label="Ocupação (CBO)",
+                    orientation="h",
+                )
+                st.plotly_chart(fig_cbo, use_container_width=True)
+            else:
+                st.info(
+                    "Coluna `cbo_descricao` não está disponível na base filtrada."
+                )
+
+        # 2) Profissionais por tipo RAS
+        with st.expander("Distribuição por Tipo RAS", expanded=False):
+            df_ras = query_prof_group_ras(
+                where_sql_prof, bq_params_prof, prof_table_id
             )
-            df_ras = df_ras.sort_values("qtd_profissionais", ascending=False)
+            if not df_ras.empty:
+                df_ras = df_ras.sort_values("qtd_profissionais", ascending=False)
 
-            fig_ras = bar_total_por_grupo(
-                df_ras,
-                grupo_col="profissionais_tipo_ras",
-                valor_col="qtd_profissionais",
-                titulo="Profissionais por tipo RAS",
-                x_label="Quantidade de vínculos",
-                y_label="Tipo RAS",
-                orientation="v",
+                fig_ras = bar_total_por_grupo(
+                    df_ras,
+                    grupo_col="profissionais_tipo_ras",
+                    valor_col="qtd_profissionais",
+                    titulo="Profissionais por tipo RAS",
+                    x_label="Quantidade de vínculos",
+                    y_label="Tipo RAS",
+                    orientation="v",
+                )
+                st.plotly_chart(fig_ras, use_container_width=True)
+            else:
+                st.info(
+                    "Coluna `profissionais_tipo_ras` não está disponível na base filtrada."
+                )
+
+        # 3) Atende SUS x não SUS
+        with st.expander("Atendimento SUS x não SUS", expanded=False):
+            total_sus, total_nao_sus = query_prof_sus(
+                where_sql_prof, bq_params_prof, prof_table_id
             )
-            st.plotly_chart(fig_ras, use_container_width=True)
-        else:
-            st.info("Coluna `profissionais_tipo_ras` não está disponível na base filtrada.")
 
-    # 3) Atende SUS x não SUS
-    with st.expander("Atendimento SUS x não SUS", expanded=False):
-        if "profissionais_indicador_atende_sus" in dfp.columns or "profissionais_indicador_atende_nao_sus" in dfp.columns:
-            sus_mask  = dfp.get("profissionais_indicador_atende_sus", 0).fillna(0).astype(int)       > 0
-            nao_sus_mask = dfp.get("profissionais_indicador_atende_nao_sus", 0).fillna(0).astype(int) > 0
+            if total_sus + total_nao_sus > 0:
+                df_sus = pd.DataFrame(
+                    {
+                        "categoria": ["Atende SUS", "Atende não SUS"],
+                        "qtd": [total_sus, total_nao_sus],
+                    }
+                )
 
-            total_sus     = sus_mask.sum()
-            total_nao_sus = nao_sus_mask.sum()
+                fig_sus = bar_total_por_grupo(
+                    df_sus,
+                    grupo_col="categoria",
+                    valor_col="qtd",
+                    titulo="Distribuição de vínculos segundo atendimento SUS x não SUS",
+                    x_label="Categoria",
+                    y_label="Quantidade de vínculos",
+                    orientation="v",
+                )
+                st.plotly_chart(fig_sus, use_container_width=True)
+            else:
+                st.info(
+                    "Não há dados de atendimento SUS/Não SUS para os filtros selecionados."
+                )
 
-            df_sus = pd.DataFrame({
-                "categoria": ["Atende SUS", "Atende não SUS"],
-                "qtd": [total_sus, total_nao_sus],
-            })
+        # ======================== TABELA DESCRITIVA ===========
+        st.info("📋 Tabela descritiva dos profissionais filtrados")
 
-            fig_sus = bar_total_por_grupo(
-                df_sus,
-                grupo_col="categoria",
-                valor_col="qtd",
-                titulo="Distribuição de vínculos segundo atendimento SUS x não SUS",
-                x_label="Quantidade de vínculos",
-                y_label="Categoria",
-                orientation="v",
-            )
-            st.plotly_chart(fig_sus, use_container_width=True)
-        else:
-            st.info("Colunas de indicador de atendimento SUS/Não SUS não estão disponíveis.")
+        cols_desc = [
+            "profissionais_ano",
+            "profissionais_mes",
+            "ibge_no_municipio",
+            "ibge_no_uf",
+            "profissionais_nome",
+            "profissionais_tipo_conselho",
+            "profissionais_id_registro_conselho",
+            "profissionais_cartao_nacional_saude",
+            "profissionais_tipo_vinculo",
+            "cbo_ocupacao",
+            "cbo_descricao",
+            "profissionais_tipo_cbo",
+            "profissionais_tipo_ras",
+            "profissionais_tipo_especialidade",
+            "profissionais_tipo_grupo",
+            "profissionais_carga_horaria_outros",
+            "profissionais_carga_horaria_hospitalar",
+            "profissionais_carga_horaria_ambulatorial",
+            "profissionais_indicador_estabelecimento_terceiro",
+            "profissionais_indicador_vinculo_contratado_sus",
+            "profissionais_indicador_vinculo_autonomo_sus",
+            "profissionais_indicador_vinculo_outros",
+            "profissionais_indicador_atende_sus",
+            "profissionais_indicador_atende_nao_sus",
+            "profissionais_id_estabelecimento_cnes",
+            "estabelecimentos_nome_fantasia",
+            "estabelecimentos_tipo_novo_do_estabelecimento",
+            "estabelecimentos_subtipo_do_estabelecimento",
+            "estabelecimentos_gestao",
+            "estabelecimentos_status_do_estabelecimento",
+            "estabelecimentos_convenio_sus",
+            "estabelecimentos_categoria_natureza_juridica",
+            "onco_cacon",
+            "onco_unacon",
+            "onco_radioterapia",
+            "onco_quimioterapia",
+        ]
 
-    # ============================================================
-    # 📋 TABELA DESCRITIVA — Profissionais (c/ limite de linhas)
-    # ============================================================
-    st.info("📋 Tabela descritiva dos profissionais filtrados")
+        # Apenas colunas que realmente existem na tabela
+        cols_ok = [c for c in cols_desc if c in prof_existing_cols]
 
-    cols_desc = [
-        "profissionais_ano",
-        "profissionais_mes",
-        "ibge_no_municipio",
-        "ibge_no_uf",
-        "profissionais_nome",
-        "profissionais_tipo_conselho",
-        "profissionais_id_registro_conselho",
-        "profissionais_cartao_nacional_saude",
-        "profissionais_tipo_vinculo",
-        "cbo_ocupacao",
-        "cbo_descricao",
-        "profissionais_tipo_cbo",
-        "profissionais_tipo_ras",
-        "profissionais_tipo_especialidade",
-        "profissionais_tipo_grupo",
-        "profissionais_carga_horaria_outros",
-        "profissionais_carga_horaria_hospitalar",
-        "profissionais_carga_horaria_ambulatorial",
-        "profissionais_indicador_estabelecimento_terceiro",
-        "profissionais_indicador_vinculo_contratado_sus",
-        "profissionais_indicador_vinculo_autonomo_sus",
-        "profissionais_indicador_vinculo_outros",
-        "profissionais_indicador_atende_sus",
-        "profissionais_indicador_atende_nao_sus",
-        "profissionais_id_estabelecimento_cnes",
-        "estabelecimentos_nome_fantasia",
-        "estabelecimentos_tipo_novo_do_estabelecimento",
-        "estabelecimentos_subtipo_do_estabelecimento",
-        "estabelecimentos_gestao",
-        "estabelecimentos_status_do_estabelecimento",
-        "estabelecimentos_convenio_sus",
-        "estabelecimentos_categoria_natureza_juridica",
-        "onco_cacon",
-        "onco_unacon",
-        "onco_radioterapia",
-        "onco_quimioterapia",
-    ]
-
-    cols_ok = [c for c in cols_desc if c in dfp.columns]
-
-    if cols_ok:
         max_rows_display = 5000
-        n_total = dfp.shape[0]
+        n_total = total_vinc
 
-        if n_total > max_rows_display:
+        if not cols_ok:
             st.warning(
-                f"A base filtrada possui {fmt_num(n_total)} linhas. "
-                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
-                "Use o botão de download para obter o conjunto completo."
+                "Não existem colunas suficientes para montar a tabela de profissionais."
             )
         else:
-            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+            if n_total > max_rows_display:
+                st.warning(
+                    f"A base filtrada possui {fmt_num(n_total)} vínculos. "
+                    f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                    "O download também está limitado às mesmas linhas."
+                )
+            else:
+                st.caption(f"A base filtrada possui {fmt_num(n_total)} vínculos.")
 
-        df_display = dfp[cols_ok].head(max_rows_display)
+            df_display = query_prof_detalhe(
+                where_sql_prof,
+                bq_params_prof,
+                prof_table_id,
+                cols_ok,
+                limit_rows=max_rows_display,
+            )
 
-        st.dataframe(df_display, use_container_width=True, height=500)
+            if df_display.empty:
+                st.warning(
+                    "Não foi possível carregar a tabela detalhada de profissionais com os filtros aplicados."
+                )
+            else:
+                st.dataframe(df_display, use_container_width=True, height=500)
 
-        csv = dfp[cols_ok].to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 Baixar CSV",
-            csv,
-            "profissionais_filtrados.csv",
-            "text/csv",
-        )
-    else:
-        st.info("Não existem colunas suficientes para montar a tabela de profissionais.")
+                csv = df_display.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "📥 Baixar CSV (até 5.000 linhas)",
+                    csv,
+                    "profissionais_filtrados.csv",
+                    "text/csv",
+                    use_container_width=True,
+                )
