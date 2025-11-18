@@ -1917,23 +1917,24 @@ elif aba == "🗂️ Serviços":
 elif aba == "✅ Habilitação":
     st.subheader("✅ Habilitação")
 
-    # ---------------------------------------------------------
-    # Carregar base detalhada (para filtros + tabela)
-    # ---------------------------------------------------------
-    with st.spinner("⏳ Carregando base de habilitações..."):
-        df_hab = load_table(TABLES["habilitacao"]).copy()
+    import pandas as pd
+    from google.cloud import bigquery
 
+    # ---------------------------------------------------------
+    # Referência da tabela no BigQuery
+    # ---------------------------------------------------------
     hab_table_id = TABLES["habilitacao"]
 
     # ---------------------------------------------------------
-    # Helpers para BigQuery (agregações)
+    # Helpers para BigQuery (cliente)
     # ---------------------------------------------------------
-    from google.cloud import bigquery
-
     @st.cache_resource
     def get_bq_client_hab():
         return bigquery.Client()
 
+    # ---------------------------------------------------------
+    # WHERE dinâmico (para todas as queries do BQ)
+    # ---------------------------------------------------------
     def build_where_hab(
         ano_hab_sel,
         mes_hab_sel,
@@ -2048,6 +2049,9 @@ elif aba == "✅ Habilitação":
         where_sql = "WHERE " + " AND ".join(clauses)
         return where_sql, params
 
+    # ---------------------------------------------------------
+    # KPIs (BigQuery)
+    # ---------------------------------------------------------
     def query_hab_kpis(where_sql: str, params, table_id: str):
         """
         KPIs direto do BigQuery:
@@ -2094,6 +2098,9 @@ elif aba == "✅ Habilitação":
         df = job.to_dataframe()
         return df.iloc[0]
 
+    # ---------------------------------------------------------
+    # Agregado genérico (BigQuery)
+    # ---------------------------------------------------------
     def query_hab_group(
         where_sql: str,
         params,
@@ -2127,6 +2134,9 @@ elif aba == "✅ Habilitação":
         )
         return job.to_dataframe()
 
+    # ---------------------------------------------------------
+    # Série temporal anual (BigQuery)
+    # ---------------------------------------------------------
     def query_hab_por_ano(where_sql: str, params, table_id: str) -> pd.DataFrame:
         """
         Retorna série temporal anual de habilitações.
@@ -2148,11 +2158,118 @@ elif aba == "✅ Habilitação":
         )
         return job.to_dataframe()
 
-    # Helper local para opções dos filtros na sidebar
-    def _opts_hab(col: str):
-        if col not in df_hab:
+    # ---------------------------------------------------------
+    # Ativas vs Encerradas (BigQuery)
+    # ---------------------------------------------------------
+    def query_hab_status(where_sql: str, params, table_id: str):
+        """
+        Calcula total de habilitações ativas e encerradas direto no BigQuery.
+        Regra:
+          - Ativa se ano_final=9999 e mes_final=9999
+          - Ou se (ano_final*100 + mes_final) >= competência atual (ano*100+mes)
+          - Caso contrário, encerrada
+        """
+        client = get_bq_client_hab()
+
+        hoje = pd.Timestamp.today()
+        comp_atual = hoje.year * 100 + hoje.month
+
+        extra_params = list(params) + [
+            bigquery.ScalarQueryParameter("comp_atual", "INT64", int(comp_atual))
+        ]
+
+        sql = f"""
+        WITH base AS (
+          SELECT
+            SAFE_CAST(habilitacao_ano_competencia_final AS INT64) AS ano_final,
+            SAFE_CAST(habilitacao_mes_competencia_final AS INT64) AS mes_final
+          FROM `{table_id}`
+          {where_sql}
+        ),
+        classif AS (
+          SELECT
+            CASE
+              WHEN ano_final = 9999 AND mes_final = 9999 THEN 'ativa'
+              WHEN ano_final IS NOT NULL AND mes_final IS NOT NULL
+                   AND (ano_final * 100 + mes_final) >= @comp_atual
+                THEN 'ativa'
+              ELSE 'encerrada'
+            END AS status
+          FROM base
+          WHERE ano_final IS NOT NULL AND mes_final IS NOT NULL
+        )
+        SELECT
+          SUM(CASE WHEN status = 'ativa' THEN 1 ELSE 0 END) AS total_ativas,
+          SUM(CASE WHEN status = 'encerrada' THEN 1 ELSE 0 END) AS total_encerradas
+        FROM classif
+        """
+
+        job = client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=extra_params),
+        )
+        df = job.to_dataframe()
+        if df.empty:
+            return 0, 0
+        row = df.iloc[0]
+        return int(row["total_ativas"] or 0), int(row["total_encerradas"] or 0)
+
+    # ---------------------------------------------------------
+    # Detalhe (tabela descritiva) – BigQuery com LIMIT
+    # ---------------------------------------------------------
+    def query_hab_detalhe(
+        where_sql: str,
+        params,
+        table_id: str,
+        cols: list[str],
+        limit_rows: int = 5000,
+    ) -> pd.DataFrame:
+        """
+        Busca dados detalhados das habilitações com os filtros aplicados,
+        limitado a `limit_rows` para exibição/CSV.
+        """
+        if not cols:
+            return pd.DataFrame()
+
+        client = get_bq_client_hab()
+        cols_sql = ", ".join(cols)
+
+        sql = f"""
+        SELECT
+          {cols_sql}
+        FROM `{table_id}`
+        {where_sql}
+        LIMIT {limit_rows}
+        """
+
+        job = client.query(
+            sql,
+            job_config=bigquery.QueryJobConfig(query_parameters=params),
+        )
+        return job.to_dataframe()
+
+    # ---------------------------------------------------------
+    # Opções dos filtros (DISTINCT no BigQuery)
+    # ---------------------------------------------------------
+    @st.cache_data(show_spinner=False)
+    def _opts_hab(col: str) -> list[str]:
+        """
+        Busca valores distintos de uma coluna na tabela de habilitações.
+        Usado só para montar as opções dos filtros (sem aplicar WHERE).
+        """
+        client = get_bq_client_hab()
+        sql = f"""
+        SELECT DISTINCT CAST({col} AS STRING) AS val
+        FROM `{hab_table_id}`
+        WHERE {col} IS NOT NULL
+        ORDER BY val
+        """
+        try:
+            df = client.query(sql).to_dataframe()
+            return df["val"].dropna().tolist()
+        except Exception:
+            # Em caso de erro (ex: coluna não existe), volta lista vazia
             return []
-        return sorted(df_hab[col].dropna().unique())
 
     # =========================================================
     # SIDEBAR DE FILTROS
@@ -2381,71 +2498,20 @@ elif aba == "✅ Habilitação":
 
     with spinner:
         # =========================================================
-        # Aplicação dos filtros em pandas (para tabela + status)
-        # =========================================================
-        dfh = df_hab.copy()
-
-        def apply_multisel(df, col, sel):
-            if sel and col in df:
-                return df[df[col].isin(sel)]
-            return df
-
-        # Período
-        dfh = apply_multisel(dfh, "habilitacao_ano", ano_hab_sel)
-        dfh = apply_multisel(dfh, "habilitacao_mes", mes_hab_sel)
-        dfh = apply_multisel(dfh, "habilitacao_ano_competencia_inicial", ano_comp_ini_sel)
-        dfh = apply_multisel(dfh, "habilitacao_mes_competencia_inicial", mes_comp_ini_sel)
-        dfh = apply_multisel(dfh, "habilitacao_ano_competencia_final", ano_comp_fim_sel)
-        dfh = apply_multisel(dfh, "habilitacao_mes_competencia_final", mes_comp_fim_sel)
-        dfh = apply_multisel(dfh, "habilitacao_ano_portaria", ano_portaria_sel)
-        dfh = apply_multisel(dfh, "habilitacao_mes_portaria", mes_portaria_sel)
-
-        # Território
-        dfh = apply_multisel(dfh, "ibge_no_uf", uf_sel)
-        dfh = apply_multisel(dfh, "ibge_no_regiao_saude", reg_saude_sel)
-        dfh = apply_multisel(dfh, "ibge_no_mesorregiao", meso_sel)
-        dfh = apply_multisel(dfh, "ibge_no_microrregiao", micro_sel)
-        dfh = apply_multisel(dfh, "ibge_no_municipio", mun_sel)
-        dfh = apply_multisel(dfh, "ibge_ivs", ivs_sel)
-
-        # Perfil do estabelecimento
-        dfh = apply_multisel(
-            dfh, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel
-        )
-        dfh = apply_multisel(
-            dfh, "estabelecimentos_subtipo_do_estabelecimento", subtipo_sel
-        )
-        dfh = apply_multisel(dfh, "estabelecimentos_gestao", gestao_sel)
-        dfh = apply_multisel(dfh, "estabelecimentos_convenio_sus", convenio_sel)
-        dfh = apply_multisel(
-            dfh, "estabelecimentos_categoria_natureza_juridica", nat_jur_sel
-        )
-        dfh = apply_multisel(
-            dfh, "estabelecimentos_status_do_estabelecimento", status_sel
-        )
-
-        # Habilitação
-        dfh = apply_multisel(dfh, "habilitacao_nivel_habilitacao_tipo", nivel_tipo_sel)
-        dfh = apply_multisel(dfh, "referencia_habilitacao_no_categoria", cat_hab_sel)
-        dfh = apply_multisel(dfh, "referencia_habilitacao_no_habilitacao", no_hab_sel)
-        dfh = apply_multisel(dfh, "referencia_habilitacao_ds_tag", tag_hab_sel)
-
-        # Se depois dos filtros não sobrar nada, aborta o resto
-        if dfh.empty:
-            st.warning("Nenhuma habilitação encontrada com os filtros selecionados.")
-            st.stop()
-
-        # =========================================================
-        # METRIC CARDS – agora agregados direto no BigQuery
+        # METRIC CARDS – agregados direto no BigQuery
         # =========================================================
         st.info("📏 Grandes números: visão rápida das habilitações com os filtros aplicados")
 
         kpis_hab = query_hab_kpis(where_sql_hab, bq_params_hab, hab_table_id)
 
-        total_hab = kpis_hab["total_hab"] or 0
+        total_hab = int(kpis_hab["total_hab"] or 0)
         media_uf = kpis_hab["media_uf"] or 0
         media_regsaude = kpis_hab["media_reg_saude"] or 0
         media_estab = kpis_hab["media_estab"] or 0
+
+        if total_hab == 0:
+            st.warning("Nenhuma habilitação encontrada com os filtros selecionados.")
+            st.stop()
 
         col1, col2, col3, col4 = st.columns(4)
 
@@ -2462,29 +2528,11 @@ elif aba == "✅ Habilitação":
             st.metric("Média por Estabelecimento", fmt_num(media_estab))
 
         # =========================================================
-        # Habilitações ativas vs encerradas (cálculo em pandas)
+        # Habilitações ativas vs encerradas (BigQuery)
         # =========================================================
-        for col in [
-            "habilitacao_ano_competencia_final",
-            "habilitacao_mes_competencia_final",
-        ]:
-            if col in dfh.columns:
-                dfh[col] = pd.to_numeric(dfh[col], errors="coerce")
-
-        ano_final = dfh["habilitacao_ano_competencia_final"]
-        mes_final = dfh["habilitacao_mes_competencia_final"]
-
-        hoje = pd.Timestamp.today()
-        comp_atual = hoje.year * 100 + hoje.month
-        comp_final = ano_final * 100 + mes_final
-
-        ativa_mask = (ano_final == 9999) & (mes_final == 9999)
-        ativa_mask |= (comp_final >= comp_atual)
-
-        encerrada_mask = ~ativa_mask
-
-        total_ativas = int(ativa_mask.sum())
-        total_encerradas = int(encerrada_mask.sum())
+        total_ativas, total_encerradas = query_hab_status(
+            where_sql_hab, bq_params_hab, hab_table_id
+        )
         total_validas = total_ativas + total_encerradas
 
         perc_enc = (total_encerradas / total_validas * 100) if total_validas > 0 else 0
@@ -2633,23 +2681,33 @@ elif aba == "✅ Habilitação":
             "ibge_ivs",
         ]
 
-        cols_ok = [c for c in cols_desc if c in dfh.columns]
+        cols_ok = cols_desc  # assumindo schema coerente com a base
 
-        if cols_ok:
-            max_rows_display = 5000
-            n_total = dfh.shape[0]
+        max_rows_display = 5000
+        n_total = total_hab  # já veio do KPI
 
-            if n_total > max_rows_display:
-                st.warning(
-                    f"A base filtrada possui {fmt_num(n_total)} linhas. "
-                    f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
-                    "O download também está limitado às mesmas linhas."
-                )
-            else:
-                st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
+        if n_total > max_rows_display:
+            st.warning(
+                f"A base filtrada possui {fmt_num(n_total)} linhas. "
+                f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
+                "O download também está limitado às mesmas linhas."
+            )
+        else:
+            st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
 
-            df_display = dfh[cols_ok].head(max_rows_display)
+        df_display = query_hab_detalhe(
+            where_sql_hab,
+            bq_params_hab,
+            hab_table_id,
+            cols_ok,
+            limit_rows=max_rows_display,
+        )
 
+        if df_display.empty:
+            st.warning(
+                "Não foi possível carregar a tabela detalhada de habilitações com os filtros aplicados."
+            )
+        else:
             st.dataframe(
                 df_display,
                 use_container_width=True,
@@ -2663,10 +2721,6 @@ elif aba == "✅ Habilitação":
                 "habilitacoes_filtradas.csv",
                 "text/csv",
                 use_container_width=True,
-            )
-        else:
-            st.warning(
-                "Não existem colunas suficientes para montar a tabela de habilitações."
             )
 
 # =====================================================================
