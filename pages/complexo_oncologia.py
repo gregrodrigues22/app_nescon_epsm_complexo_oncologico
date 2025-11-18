@@ -5433,6 +5433,6 @@ elif aba == "👩‍⚕️ Profissionais":
 # =====================================================================
 # 4) Cadastro Leitos
 # =====================================================================
-elif aba == "📋 Registross":
+elif aba == "📋 Registros":
     st.subheader("📋 Registros")
     st.write("Em breve")
