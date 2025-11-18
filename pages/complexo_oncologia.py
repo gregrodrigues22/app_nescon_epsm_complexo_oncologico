@@ -5429,3 +5429,10 @@ elif aba == "👩‍⚕️ Profissionais":
                     "text/csv",
                     use_container_width=True,
                 )
+
+# =====================================================================
+# 4) Cadastro Leitos
+# =====================================================================
+elif aba == "📋 Registross":
+    st.subheader("📋 Registros")
+    st.write("Em breve")
