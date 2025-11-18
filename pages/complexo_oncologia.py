@@ -2800,16 +2800,397 @@ elif aba == "🛏️ Leitos":
     st.subheader("🛏️ Leitos")
 
     # ---------------------------------------------------------
-    # Carregar dados
+    # Inicialização: BigQuery + opções de filtros (com spinner)
     # ---------------------------------------------------------
     with st.spinner("⏳ Carregando base de leitos..."):
-        df_lei = load_table(TABLES["leitos"]).copy()
 
-    # Helper local para opções dos filtros
-    def _opts_lei(col: str):
-        if col not in df_lei:
-            return []
-        return sorted(df_lei[col].dropna().unique())
+        import pandas as pd
+        from google.cloud import bigquery
+
+        lei_table_id = TABLES["leitos"]
+
+        # ----------------------- Cliente BQ -------------------
+        @st.cache_resource
+        def get_bq_client_lei():
+            return bigquery.Client()
+
+        # ----------------------- WHERE dinâmico ---------------
+        def build_where_lei(
+            ano_sel,
+            mes_sel,
+            uf_sel,
+            reg_saude_sel,
+            meso_sel,
+            micro_sel,
+            mun_sel,
+            ivs_sel,
+            tipo_novo_sel,
+            tipo_sel,
+            subtipo_sel,
+            gestao_sel,
+            convenio_sel,
+            natureza_sel,
+            status_sel,
+            # booleanos complexos / onco
+            onco_cacon_sel,
+            onco_unacon_sel,
+            onco_radio_sel,
+            onco_quimio_sel,
+            hab_onco_cir_sel,
+            uti_adulto_sel,
+            uti_ped_sel,
+            uti_neo_sel,
+            uti_cor_sel,
+            ucin_sel,
+            uti_queim_sel,
+            caps_psiq_sel,
+            rehab_cer_sel,
+            cardio_ac_sel,
+            nutricao_sel,
+            odonto_ceo_sel,
+            # tipos de leito
+            esp_sel,
+            tipo_leito_sel,
+            tipo_nome_sel,
+            ref_no_leito_sel,
+        ):
+            """
+            Monta WHERE dinâmico + parâmetros BigQuery
+            para todos os filtros da aba Leitos.
+            """
+            clauses = ["1=1"]
+            params: list[bigquery.QueryParameter] = []
+
+            def add_in_array(col: str, param_name: str, values):
+                if values:
+                    vals = [str(v) for v in values]
+                    clauses.append(f"CAST({col} AS STRING) IN UNNEST(@{param_name})")
+                    params.append(
+                        bigquery.ArrayQueryParameter(param_name, "STRING", vals)
+                    )
+
+            def add_bool(col: str, param_name: str, values):
+                """
+                values é lista com 'Sim'/'Não'.
+                Convertemos para 1/0 e comparamos com SAFE_CAST(col AS INT64)
+                para funcionar com bool/int.
+                """
+                if not values:
+                    return
+                allowed = []
+                if "Sim" in values:
+                    allowed.append(1)
+                if "Não" in values:
+                    allowed.append(0)
+                if not allowed:
+                    return
+                clauses.append(
+                    f"SAFE_CAST({col} AS INT64) IN UNNEST(@{param_name})"
+                )
+                params.append(
+                    bigquery.ArrayQueryParameter(param_name, "INT64", allowed)
+                )
+
+            # Período / território
+            add_in_array("leitos_ano", "ano", ano_sel)
+            add_in_array("leitos_mes", "mes", mes_sel)
+            add_in_array("ibge_no_uf", "uf", uf_sel)
+            add_in_array("ibge_no_regiao_saude", "reg_saude", reg_saude_sel)
+            add_in_array("ibge_no_mesorregiao", "meso", meso_sel)
+            add_in_array("ibge_no_microrregiao", "micro", micro_sel)
+            add_in_array("ibge_no_municipio", "mun", mun_sel)
+            add_in_array("ibge_ivs", "ivs", ivs_sel)
+
+            # Perfil Estabelecimento
+            add_in_array(
+                "estabelecimentos_tipo_novo_do_estabelecimento",
+                "tipo_novo",
+                tipo_novo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_tipo_do_estabelecimento",
+                "tipo",
+                tipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_subtipo_do_estabelecimento",
+                "subtipo",
+                subtipo_sel,
+            )
+            add_in_array(
+                "estabelecimentos_gestao",
+                "gestao",
+                gestao_sel,
+            )
+            add_in_array(
+                "estabelecimentos_convenio_sus",
+                "convenio",
+                convenio_sel,
+            )
+            add_in_array(
+                "estabelecimentos_categoria_natureza_juridica",
+                "natureza",
+                natureza_sel,
+            )
+            add_in_array(
+                "estabelecimentos_status_do_estabelecimento",
+                "status_estab",
+                status_sel,
+            )
+
+            # Booleanos (onco / complexos / UTI / etc.)
+            add_bool("onco_cacon", "onco_cacon", onco_cacon_sel)
+            add_bool("onco_unacon", "onco_unacon", onco_unacon_sel)
+            add_bool("onco_radioterapia", "onco_radio", onco_radio_sel)
+            add_bool("onco_quimioterapia", "onco_quimio", onco_quimio_sel)
+            add_bool(
+                "habilitacao_agrupado_onco_cirurgica",
+                "onco_cir",
+                hab_onco_cir_sel,
+            )
+
+            add_bool("habilitacao_agrupado_uti_adulto", "uti_adulto", uti_adulto_sel)
+            add_bool("habilitacao_agrupado_uti_pediatrica", "uti_ped", uti_ped_sel)
+            add_bool("habilitacao_agrupado_uti_neonatal", "uti_neo", uti_neo_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_coronariana",
+                "uti_cor",
+                uti_cor_sel,
+            )
+            add_bool("habilitacao_agrupado_ucin", "ucin", ucin_sel)
+            add_bool(
+                "habilitacao_agrupado_uti_queimados",
+                "uti_queim",
+                uti_queim_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_saude_mental_caps_psiq",
+                "caps_psiq",
+                caps_psiq_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_reabilitacao_cer",
+                "rehab_cer",
+                rehab_cer_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_cardio_alta_complex",
+                "cardio_ac",
+                cardio_ac_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_nutricao",
+                "nutricao",
+                nutricao_sel,
+            )
+            add_bool(
+                "habilitacao_agrupado_odontologia_ceo",
+                "odonto_ceo",
+                odonto_ceo_sel,
+            )
+
+            # Tipos de leito
+            add_in_array(
+                "leitos_tipo_especialidade_leito",
+                "esp",
+                esp_sel,
+            )
+            add_in_array(
+                "leitos_tipo_leito",
+                "tipo_leito",
+                tipo_leito_sel,
+            )
+            add_in_array(
+                "leitos_tipo_leito_nome",
+                "tipo_nome",
+                tipo_nome_sel,
+            )
+            add_in_array(
+                "referencia_especialidade_no_leito",
+                "ref_no_leito",
+                ref_no_leito_sel,
+            )
+
+            where_sql = "WHERE " + " AND ".join(clauses)
+            return where_sql, params
+
+        # ----------------------- KPIs -------------------------
+        def query_lei_kpis(where_sql: str, params, table_id: str):
+            """
+            KPIs direto do BigQuery:
+              - total_registros (linhas)
+              - total_leitos (soma leitos_quantidade_total)
+              - média de leitos por UF
+              - média de leitos por Região de Saúde
+              - média de leitos por Estabelecimento
+            """
+            client = get_bq_client_lei()
+            sql = f"""
+            WITH base AS (
+              SELECT
+                leitos_id_estabelecimento_cnes,
+                ibge_no_uf,
+                ibge_no_regiao_saude,
+                COALESCE(CAST(leitos_quantidade_total AS FLOAT64), 0) AS qtd
+              FROM `{table_id}`
+              {where_sql}
+            ),
+            uf_agg AS (
+              SELECT ibge_no_uf, SUM(qtd) AS leitos_uf
+              FROM base
+              GROUP BY ibge_no_uf
+            ),
+            reg_agg AS (
+              SELECT ibge_no_regiao_saude, SUM(qtd) AS leitos_reg
+              FROM base
+              GROUP BY ibge_no_regiao_saude
+            ),
+            estab_agg AS (
+              SELECT leitos_id_estabelecimento_cnes, SUM(qtd) AS leitos_estab
+              FROM base
+              GROUP BY leitos_id_estabelecimento_cnes
+            )
+            SELECT
+              (SELECT COUNT(*) FROM base) AS total_registros,
+              (SELECT SUM(qtd) FROM base) AS total_leitos,
+              (SELECT AVG(leitos_uf) FROM uf_agg) AS media_uf,
+              (SELECT AVG(leitos_reg) FROM reg_agg) AS media_reg_saude,
+              (SELECT AVG(leitos_estab) FROM estab_agg) AS media_estab;
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            return df.iloc[0] if not df.empty else None
+
+        # ----------------------- Agregados genéricos ---------
+        def query_lei_group_tipo_nome(where_sql: str, params, table_id: str):
+            """
+            Soma de leitos por leitos_tipo_leito_nome.
+            """
+            client = get_bq_client_lei()
+            sql = f"""
+            SELECT
+              leitos_tipo_leito_nome,
+              SUM(COALESCE(CAST(leitos_quantidade_total AS FLOAT64), 0)) AS qtd_leitos
+            FROM `{table_id}`
+            {where_sql}
+            GROUP BY leitos_tipo_leito_nome
+            HAVING leitos_tipo_leito_nome IS NOT NULL
+            ORDER BY qtd_leitos DESC
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        def query_lei_sus_contrat_total(where_sql: str, params, table_id: str):
+            """
+            Totais de leitos SUS, contratados e total.
+            """
+            client = get_bq_client_lei()
+            sql = f"""
+            SELECT
+              SUM(COALESCE(CAST(leitos_quantidade_sus AS FLOAT64), 0)) AS total_sus,
+              SUM(COALESCE(CAST(leitos_quantidade_contratado AS FLOAT64), 0)) AS total_contratado,
+              SUM(COALESCE(CAST(leitos_quantidade_total AS FLOAT64), 0)) AS total_total
+            FROM `{table_id}`
+            {where_sql}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            df = job.to_dataframe()
+            if df.empty:
+                return 0, 0, 0
+            row = df.iloc[0]
+            return (
+                float(row["total_sus"] or 0),
+                float(row["total_contratado"] or 0),
+                float(row["total_total"] or 0),
+            )
+
+        # ----------------------- Tabela detalhada ------------
+        def query_lei_detalhe(
+            where_sql: str,
+            params,
+            table_id: str,
+            cols: list[str],
+            limit_rows: int = 5000,
+        ) -> pd.DataFrame:
+            """
+            Busca dados detalhados dos leitos com os filtros aplicados,
+            limitado a `limit_rows` para exibição/CSV.
+            """
+            if not cols:
+                return pd.DataFrame()
+            client = get_bq_client_lei()
+            cols_sql = ", ".join(cols)
+            sql = f"""
+            SELECT
+              {cols_sql}
+            FROM `{table_id}`
+            {where_sql}
+            LIMIT {limit_rows}
+            """
+            job = client.query(
+                sql,
+                job_config=bigquery.QueryJobConfig(query_parameters=params),
+            )
+            return job.to_dataframe()
+
+        # ----------------------- Opções de filtros (DISTINCT) -
+        @st.cache_data(show_spinner=False)
+        def _opts_lei(col: str) -> list[str]:
+            """
+            Busca valores distintos de uma coluna na tabela de leitos.
+            Usado só para montar as opções dos filtros (sem aplicar WHERE).
+            """
+            client = get_bq_client_lei()
+            sql = f"""
+            SELECT DISTINCT CAST({col} AS STRING) AS val
+            FROM `{lei_table_id}`
+            WHERE {col} IS NOT NULL
+            ORDER BY val
+            """
+            try:
+                df = client.query(sql).to_dataframe()
+                return df["val"].dropna().tolist()
+            except Exception:
+                return []
+
+        # ----------------------- Carregar todas as opções ----
+        opts = {
+            # Período
+            "ano": _opts_lei("leitos_ano"),
+            "mes": _opts_lei("leitos_mes"),
+
+            # Território
+            "uf": _opts_lei("ibge_no_uf"),
+            "reg_saude": _opts_lei("ibge_no_regiao_saude"),
+            "meso": _opts_lei("ibge_no_mesorregiao"),
+            "micro": _opts_lei("ibge_no_microrregiao"),
+            "mun": _opts_lei("ibge_no_municipio"),
+            "ivs": _opts_lei("ibge_ivs"),
+
+            # Perfil do estabelecimento
+            "tipo_novo": _opts_lei("estabelecimentos_tipo_novo_do_estabelecimento"),
+            "tipo": _opts_lei("estabelecimentos_tipo_do_estabelecimento"),
+            "subtipo": _opts_lei("estabelecimentos_subtipo_do_estabelecimento"),
+            "gestao": _opts_lei("estabelecimentos_gestao"),
+            "convenio": _opts_lei("estabelecimentos_convenio_sus"),
+            "natureza": _opts_lei("estabelecimentos_categoria_natureza_juridica"),
+            "status": _opts_lei("estabelecimentos_status_do_estabelecimento"),
+
+            # Tipos de leito
+            "esp": _opts_lei("leitos_tipo_especialidade_leito"),
+            "tipo_leito": _opts_lei("leitos_tipo_leito"),
+            "tipo_nome": _opts_lei("leitos_tipo_leito_nome"),
+            "ref_no_leito": _opts_lei("referencia_especialidade_no_leito"),
+        }
 
     # =========================================================
     # SIDEBAR DE FILTROS
@@ -2823,13 +3204,13 @@ elif aba == "🛏️ Leitos":
         with st.expander("Fitros de Período", expanded=False):
             ano_sel = st.multiselect(
                 "Ano",
-                _opts_lei("leitos_ano"),
+                opts["ano"],
                 key="lei_ano",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mes_sel = st.multiselect(
                 "Mês",
-                _opts_lei("leitos_mes"),
+                opts["mes"],
                 key="lei_mes",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2838,37 +3219,37 @@ elif aba == "🛏️ Leitos":
         with st.expander("Fitros de Território", expanded=False):
             uf_sel = st.multiselect(
                 "UF",
-                _opts_lei("ibge_no_uf"),
+                opts["uf"],
                 key="lei_uf",
                 placeholder="(Todos. Filtros opcionais)",
             )
             reg_saude_sel = st.multiselect(
                 "Região de Saúde",
-                _opts_lei("ibge_no_regiao_saude"),
+                opts["reg_saude"],
                 key="lei_regsaude",
                 placeholder="(Todos. Filtros opcionais)",
             )
             meso_sel = st.multiselect(
                 "Mesorregião",
-                _opts_lei("ibge_no_mesorregiao"),
+                opts["meso"],
                 key="lei_meso",
                 placeholder="(Todos. Filtros opcionais)",
             )
             micro_sel = st.multiselect(
                 "Microrregião",
-                _opts_lei("ibge_no_microrregiao"),
+                opts["micro"],
                 key="lei_micro",
                 placeholder="(Todos. Filtros opcionais)",
             )
             mun_sel = st.multiselect(
                 "Município",
-                _opts_lei("ibge_no_municipio"),
+                opts["mun"],
                 key="lei_mun",
                 placeholder="(Todos. Filtros opcionais)",
             )
             ivs_sel = st.multiselect(
                 "Município IVS",
-                _opts_lei("ibge_ivs"),
+                opts["ivs"],
                 key="lei_ivs",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2877,43 +3258,43 @@ elif aba == "🛏️ Leitos":
         with st.expander("Fitros de Perfil do Estabelecimento", expanded=False):
             tipo_novo_sel = st.multiselect(
                 "Tipo (novo)",
-                _opts_lei("estabelecimentos_tipo_novo_do_estabelecimento"),
+                opts["tipo_novo"],
                 key="lei_tipo_novo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_sel = st.multiselect(
                 "Tipo do estabelecimento",
-                _opts_lei("estabelecimentos_tipo_do_estabelecimento"),
+                opts["tipo"],
                 key="lei_tipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             subtipo_sel = st.multiselect(
                 "Subtipo",
-                _opts_lei("estabelecimentos_subtipo_do_estabelecimento"),
+                opts["subtipo"],
                 key="lei_subtipo",
                 placeholder="(Todos. Filtros opcionais)",
             )
             gestao_sel = st.multiselect(
                 "Gestão",
-                _opts_lei("estabelecimentos_gestao"),
+                opts["gestao"],
                 key="lei_gestao",
                 placeholder="(Todos. Filtros opcionais)",
             )
             convenio_sel = st.multiselect(
                 "Convênio SUS",
-                _opts_lei("estabelecimentos_convenio_sus"),
+                opts["convenio"],
                 key="lei_convenio",
                 placeholder="(Todos. Filtros opcionais)",
             )
             natureza_sel = st.multiselect(
                 "Natureza Jurídica",
-                _opts_lei("estabelecimentos_categoria_natureza_juridica"),
+                opts["natureza"],
                 key="lei_natjur",
                 placeholder="(Todos. Filtros opcionais)",
             )
             status_sel = st.multiselect(
                 "Status",
-                _opts_lei("estabelecimentos_status_do_estabelecimento"),
+                opts["status"],
                 key="lei_status",
                 placeholder="(Todos. Filtros opcionais)",
             )
@@ -2922,165 +3303,144 @@ elif aba == "🛏️ Leitos":
         with st.expander("Fitros de Complexos / Oncologia", expanded=False):
             def bool_multiselect(label, key):
                 return st.multiselect(
-                    label, ["Sim", "Não"], key=key,
+                    label,
+                    ["Sim", "Não"],
+                    key=key,
                     placeholder="(Todos. Filtros opcionais)",
                 )
 
-            onco_cacon_sel   = bool_multiselect("CACON",           "lei_onco_cacon")
-            onco_unacon_sel  = bool_multiselect("UNACON",          "lei_onco_unacon")
-            onco_radio_sel   = bool_multiselect("Radioterapia",    "lei_onco_radio")
-            onco_quimio_sel  = bool_multiselect("Quimioterapia",   "lei_onco_quimio")
-            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica",  "lei_onco_cir")
+            onco_cacon_sel = bool_multiselect("CACON", "lei_onco_cacon")
+            onco_unacon_sel = bool_multiselect("UNACON", "lei_onco_unacon")
+            onco_radio_sel = bool_multiselect("Radioterapia", "lei_onco_radio")
+            onco_quimio_sel = bool_multiselect("Quimioterapia", "lei_onco_quimio")
+            hab_onco_cir_sel = bool_multiselect("Onco Cirúrgica", "lei_onco_cir")
 
-            uti_adulto_sel   = bool_multiselect("UTI Adulto",      "lei_uti_adulto")
-            uti_ped_sel      = bool_multiselect("UTI Pediátrica",  "lei_uti_ped")
-            uti_neo_sel      = bool_multiselect("UTI Neonatal",    "lei_uti_neo")
-            uti_cor_sel      = bool_multiselect("UTI Coronariana", "lei_uti_cor")
-            ucin_sel         = bool_multiselect("UCIN",            "lei_ucin")
-            uti_queim_sel    = bool_multiselect("UTI Queimados",   "lei_uti_queim")
-            caps_psiq_sel    = bool_multiselect("Saúde Mental CAPS/Psiq", "lei_caps_psiq")
-            rehab_cer_sel    = bool_multiselect("Reabilitação CER",      "lei_rehab_cer")
-            cardio_ac_sel    = bool_multiselect("Cardio Alta Complex.",  "lei_cardio_ac")
-            nutricao_sel     = bool_multiselect("Nutrição",              "lei_nutricao")
-            odonto_ceo_sel   = bool_multiselect("Odontologia CEO",       "lei_odonto_ceo")
+            uti_adulto_sel = bool_multiselect("UTI Adulto", "lei_uti_adulto")
+            uti_ped_sel = bool_multiselect("UTI Pediátrica", "lei_uti_ped")
+            uti_neo_sel = bool_multiselect("UTI Neonatal", "lei_uti_neo")
+            uti_cor_sel = bool_multiselect("UTI Coronariana", "lei_uti_cor")
+            ucin_sel = bool_multiselect("UCIN", "lei_ucin")
+            uti_queim_sel = bool_multiselect("UTI Queimados", "lei_uti_queim")
+            caps_psiq_sel = bool_multiselect(
+                "Saúde Mental CAPS/Psiq", "lei_caps_psiq"
+            )
+            rehab_cer_sel = bool_multiselect("Reabilitação CER", "lei_rehab_cer")
+            cardio_ac_sel = bool_multiselect(
+                "Cardio Alta Complex.", "lei_cardio_ac"
+            )
+            nutricao_sel = bool_multiselect("Nutrição", "lei_nutricao")
+            odonto_ceo_sel = bool_multiselect(
+                "Odontologia CEO", "lei_odonto_ceo"
+            )
 
         # ----------------- Tipos de Leito -----------------
         with st.expander("Fitros de Tipos de Leito", expanded=False):
             esp_sel = st.multiselect(
                 "Especialidade do leito",
-                _opts_lei("leitos_tipo_especialidade_leito"),
+                opts["esp"],
                 key="lei_esp",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_leito_sel = st.multiselect(
                 "Tipo de leito (código)",
-                _opts_lei("leitos_tipo_leito"),
+                opts["tipo_leito"],
                 key="lei_tipo_leito",
                 placeholder="(Todos. Filtros opcionais)",
             )
             tipo_nome_sel = st.multiselect(
                 "Tipo de leito (nome)",
-                _opts_lei("leitos_tipo_leito_nome"),
+                opts["tipo_nome"],
                 key="lei_tipo_nome",
                 placeholder="(Todos. Filtros opcionais)",
             )
             ref_no_leito_sel = st.multiselect(
                 "Descrição CNES do leito",
-                _opts_lei("referencia_especialidade_no_leito"),
+                opts["ref_no_leito"],
                 key="lei_no_leito",
                 placeholder="(Todos. Filtros opcionais)",
             )
 
     # =========================================================
-    # Aplicação dos filtros
+    # Detectar mudanças de filtros + WHERE/params
     # =========================================================
-    dfl = df_lei.copy()
+    filter_values = {
+        "ano": ano_sel,
+        "mes": mes_sel,
+        "uf": uf_sel,
+        "reg_saude": reg_saude_sel,
+        "meso": meso_sel,
+        "micro": micro_sel,
+        "mun": mun_sel,
+        "ivs": ivs_sel,
+        "tipo_novo": tipo_novo_sel,
+        "tipo": tipo_sel,
+        "subtipo": subtipo_sel,
+        "gestao": gestao_sel,
+        "convenio": convenio_sel,
+        "natureza": natureza_sel,
+        "status": status_sel,
+        "onco_cacon": onco_cacon_sel,
+        "onco_unacon": onco_unacon_sel,
+        "onco_radio": onco_radio_sel,
+        "onco_quimio": onco_quimio_sel,
+        "hab_onco_cir": hab_onco_cir_sel,
+        "uti_adulto": uti_adulto_sel,
+        "uti_ped": uti_ped_sel,
+        "uti_neo": uti_neo_sel,
+        "uti_cor": uti_cor_sel,
+        "ucin": ucin_sel,
+        "uti_queim": uti_queim_sel,
+        "caps_psiq": caps_psiq_sel,
+        "rehab_cer": rehab_cer_sel,
+        "cardio_ac": cardio_ac_sel,
+        "nutricao": nutricao_sel,
+        "odonto_ceo": odonto_ceo_sel,
+        "esp": esp_sel,
+        "tipo_leito": tipo_leito_sel,
+        "tipo_nome": tipo_nome_sel,
+        "ref_no_leito": ref_no_leito_sel,
+    }
 
-    def apply_multisel(df, col, sel):
-        if sel and col in df:
-            return df[df[col].isin(sel)]
-        return df
+    filters_changed = any(did_filters_change(k, v) for k, v in filter_values.items())
+    spinner = st.spinner("⏳ Atualizando resultados…") if filters_changed else DummySpinner()
 
-    # Período / território
-    dfl = apply_multisel(dfl, "leitos_ano",           ano_sel)
-    dfl = apply_multisel(dfl, "leitos_mes",           mes_sel)
-    dfl = apply_multisel(dfl, "ibge_no_uf",           uf_sel)
-    dfl = apply_multisel(dfl, "ibge_no_regiao_saude", reg_saude_sel)
-    dfl = apply_multisel(dfl, "ibge_no_mesorregiao",  meso_sel)
-    dfl = apply_multisel(dfl, "ibge_no_microrregiao", micro_sel)
-    dfl = apply_multisel(dfl, "ibge_no_municipio",    mun_sel)
-    dfl = apply_multisel(dfl, "ibge_ivs",             ivs_sel)
-
-    # Perfil Estabelecimento
-    dfl = apply_multisel(dfl, "estabelecimentos_tipo_novo_do_estabelecimento", tipo_novo_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_tipo_do_estabelecimento",      tipo_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_subtipo_do_estabelecimento",   subtipo_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_gestao",                       gestao_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_convenio_sus",                 convenio_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_categoria_natureza_juridica",  natureza_sel)
-    dfl = apply_multisel(dfl, "estabelecimentos_status_do_estabelecimento",    status_sel)
-
-    # Booleanos (Onco / Complexos)
-    def apply_bool(df, col, sel):
-        if not sel or col not in df:
-            return df
-        allowed = []
-        if "Sim" in sel:
-            allowed.append(True)
-        if "Não" in sel:
-            allowed.append(False)
-        return df[df[col].astype("boolean").isin(allowed)]
-
-    dfl = apply_bool(dfl, "onco_cacon",                          onco_cacon_sel)
-    dfl = apply_bool(dfl, "onco_unacon",                         onco_unacon_sel)
-    dfl = apply_bool(dfl, "onco_radioterapia",                   onco_radio_sel)
-    dfl = apply_bool(dfl, "onco_quimioterapia",                  onco_quimio_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_onco_cirurgica", hab_onco_cir_sel)
-
-    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_adulto",     uti_adulto_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_pediatrica", uti_ped_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_neonatal",   uti_neo_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_coronariana",uti_cor_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_ucin",           ucin_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_uti_queimados",  uti_queim_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_saude_mental_caps_psiq", caps_psiq_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_reabilitacao_cer",        rehab_cer_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_cardio_alta_complex",     cardio_ac_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_nutricao",                nutricao_sel)
-    dfl = apply_bool(dfl, "habilitacao_agrupado_odontologia_ceo",         odonto_ceo_sel)
-
-    # Tipos de leito
-    dfl = apply_multisel(dfl, "leitos_tipo_especialidade_leito", esp_sel)
-    dfl = apply_multisel(dfl, "leitos_tipo_leito",              tipo_leito_sel)
-    dfl = apply_multisel(dfl, "leitos_tipo_leito_nome",         tipo_nome_sel)
-    dfl = apply_multisel(dfl, "referencia_especialidade_no_leito", ref_no_leito_sel)
-
-    # Se depois dos filtros não sobrar nada, aborta o resto
-    if dfl.empty:
-        st.warning("Nenhum leito encontrado com os filtros selecionados.")
-        st.stop()
-
-    # =========================================================
-    # METRIC CARDS
-    # =========================================================
-    st.info("📏 Grandes números: visão rápida dos leitos filtrados")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        if "leitos_quantidade_total" in dfl.columns:
-            total_leitos = dfl["leitos_quantidade_total"].sum()
-        else:
-            total_leitos = dfl.shape[0]
-        st.metric("Total de leitos (somados)", fmt_num(total_leitos))
-
-    with col2:
-        if "ibge_no_uf" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
-            mean_uf = (
-                dfl.groupby("ibge_no_uf")["leitos_quantidade_total"].sum().mean()
-            )
-            st.metric("Média de leitos por UF", fmt_num(mean_uf))
-        else:
-            st.metric("Média de leitos por UF", "-")
-
-    with col3:
-        if "ibge_no_regiao_saude" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
-            mean_regsaude = (
-                dfl.groupby("ibge_no_regiao_saude")["leitos_quantidade_total"].sum().mean()
-            )
-            st.metric("Média de leitos por Reg. Saúde", fmt_num(mean_regsaude))
-        else:
-            st.metric("Média de leitos por Reg. Saúde", "-")
-
-    with col4:
-        id_estab_col = "leitos_id_estabelecimento_cnes" if "leitos_id_estabelecimento_cnes" in dfl.columns else "cnes"
-        if id_estab_col in dfl.columns and "leitos_quantidade_total" in dfl.columns:
-            mean_estab = (
-                dfl.groupby(id_estab_col)["leitos_quantidade_total"].sum().mean()
-            )
-            st.metric("Média de leitos por Estabelecimento", fmt_num(mean_estab))
-        else:
-            st.metric("Média de leitos por Estabelecimento", "-")
+    where_sql_lei, bq_params_lei = build_where_lei(
+        ano_sel,
+        mes_sel,
+        uf_sel,
+        reg_saude_sel,
+        meso_sel,
+        micro_sel,
+        mun_sel,
+        ivs_sel,
+        tipo_novo_sel,
+        tipo_sel,
+        subtipo_sel,
+        gestao_sel,
+        convenio_sel,
+        natureza_sel,
+        status_sel,
+        onco_cacon_sel,
+        onco_unacon_sel,
+        onco_radio_sel,
+        onco_quimio_sel,
+        hab_onco_cir_sel,
+        uti_adulto_sel,
+        uti_ped_sel,
+        uti_neo_sel,
+        uti_cor_sel,
+        ucin_sel,
+        uti_queim_sel,
+        caps_psiq_sel,
+        rehab_cer_sel,
+        cardio_ac_sel,
+        nutricao_sel,
+        odonto_ceo_sel,
+        esp_sel,
+        tipo_leito_sel,
+        tipo_nome_sel,
+        ref_no_leito_sel,
+    )
 
     # =========================================================
     # Função helper para limitar categorias nos gráficos
@@ -3096,123 +3456,166 @@ elif aba == "🛏️ Leitos":
         df2[col] = df2[col].where(df2[col].isin(top_vals), outros_label)
         return df2
 
-    # ============================================================
-    # 📊 GRÁFICOS
-    # ============================================================
-    st.info("📊 Gráficos — resumo visual dos leitos filtrados")
+    # =========================================================
+    # BLOCO PRINCIPAL COM SPINNER DE RESULTADOS
+    # =========================================================
+    with spinner:
+        # ======================== KPIs =======================
+        st.info("📏 Grandes números: visão rápida dos leitos filtrados")
 
-    # 1) Leitos por tipo de leito (nome)
-    with st.expander("Leitos por tipo de leito (nome)", expanded=True):
-        if "leitos_tipo_leito_nome" in dfl.columns and "leitos_quantidade_total" in dfl.columns:
-            df_tipo = (
-                dfl.groupby("leitos_tipo_leito_nome")["leitos_quantidade_total"]
-                   .sum()
-                   .reset_index(name="qtd_leitos")
+        kpis_lei = query_lei_kpis(where_sql_lei, bq_params_lei, lei_table_id)
+
+        if kpis_lei is None or (kpis_lei["total_registros"] or 0) == 0:
+            st.warning("Nenhum leito encontrado com os filtros selecionados.")
+            st.stop()
+
+        total_reg = int(kpis_lei["total_registros"] or 0)
+        total_leitos = float(kpis_lei["total_leitos"] or 0)
+        media_uf = kpis_lei["media_uf"] or 0
+        media_regsaude = kpis_lei["media_reg_saude"] or 0
+        media_estab = kpis_lei["media_estab"] or 0
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Total de leitos (somados)", fmt_num(total_leitos))
+
+        with col2:
+            st.metric("Média de leitos por UF", fmt_num(media_uf))
+
+        with col3:
+            st.metric("Média de leitos por Reg. Saúde", fmt_num(media_regsaude))
+
+        with col4:
+            st.metric("Média de leitos por Estabelecimento", fmt_num(media_estab))
+
+        # ======================== GRÁFICOS ====================
+        st.info("📊 Gráficos — resumo visual dos leitos filtrados")
+
+        # 1) Leitos por tipo de leito (nome)
+        with st.expander("Leitos por tipo de leito (nome)", expanded=True):
+            df_tipo = query_lei_group_tipo_nome(
+                where_sql_lei, bq_params_lei, lei_table_id
             )
-            df_tipo = df_tipo.sort_values("qtd_leitos", ascending=False)
-            df_tipo = col_top_n(df_tipo, "leitos_tipo_leito_nome", top_n=30)
+            if not df_tipo.empty:
+                df_tipo = df_tipo.sort_values("qtd_leitos", ascending=False)
+                df_tipo = col_top_n(df_tipo, "leitos_tipo_leito_nome", top_n=30)
 
-            fig_tipo = bar_total_por_grupo(
-                df_tipo,
-                grupo_col="leitos_tipo_leito_nome",
-                valor_col="qtd_leitos",
-                titulo="Distribuição de leitos por tipo (nome)",
-                x_label="Quantidade de leitos",
-                y_label="Tipo de leito",
-                orientation="h",
+                fig_tipo = bar_total_por_grupo(
+                    df_tipo,
+                    grupo_col="leitos_tipo_leito_nome",
+                    valor_col="qtd_leitos",
+                    titulo="Distribuição de leitos por tipo (nome)",
+                    x_label="Quantidade de leitos",
+                    y_label="Tipo de leito",
+                    orientation="h",
+                )
+                st.plotly_chart(fig_tipo, use_container_width=True)
+            else:
+                st.info(
+                    "Colunas de tipo de leito ou quantidade total não estão disponíveis."
+                )
+
+        # 2) Leitos SUS x Contratado x Total
+        with st.expander("Leitos SUS, contratados e total", expanded=False):
+            total_sus, total_cont, total_total = query_lei_sus_contrat_total(
+                where_sql_lei, bq_params_lei, lei_table_id
             )
-            st.plotly_chart(fig_tipo, use_container_width=True)
-        else:
-            st.info("Colunas de tipo de leito ou quantidade total não estão disponíveis.")
 
-    # 2) Leitos SUS x Contratado x Total
-    with st.expander("Leitos SUS, contratados e total", expanded=False):
-        cols_leitos = ["leitos_quantidade_sus", "leitos_quantidade_contratado", "leitos_quantidade_total"]
-        presentes = [c for c in cols_leitos if c in dfl.columns]
+            if total_sus + total_cont + total_total > 0:
+                df_sus = pd.DataFrame(
+                    {
+                        "categoria": [
+                            "Leitos SUS",
+                            "Leitos contratados",
+                            "Leitos totais",
+                        ],
+                        "qtd": [total_sus, total_cont, total_total],
+                    }
+                )
 
-        if presentes:
-            total_sus   = dfl["leitos_quantidade_sus"].sum() if "leitos_quantidade_sus" in dfl.columns else 0
-            total_cont  = dfl["leitos_quantidade_contratado"].sum() if "leitos_quantidade_contratado" in dfl.columns else 0
-            total_total = dfl["leitos_quantidade_total"].sum() if "leitos_quantidade_total" in dfl.columns else 0
+                fig_sus = bar_total_por_grupo(
+                    df_sus,
+                    grupo_col="categoria",
+                    valor_col="qtd",
+                    titulo="Leitos SUS, contratados e total",
+                    x_label="Categoria",
+                    y_label="Quantidade de leitos",
+                    orientation="v",
+                )
+                st.plotly_chart(fig_sus, use_container_width=True)
+            else:
+                st.info(
+                    "Não há dados de quantidade de leitos SUS/contratados/total disponíveis para os filtros selecionados."
+                )
 
-            df_sus = pd.DataFrame({
-                "categoria": ["Leitos SUS", "Leitos contratados", "Leitos totais"],
-                "qtd": [total_sus, total_cont, total_total],
-            })
+        # ======================== TABELA DESCRITIVA ===========
+        st.info("📋 Tabela descritiva dos leitos filtrados")
 
-            fig_sus = bar_total_por_grupo(
-                df_sus,
-                grupo_col="categoria",
-                valor_col="qtd",
-                titulo="Leitos SUS, contratados e total",
-                x_label="Quantidade de leitos",
-                y_label="Categoria",
-                orientation="v",
-            )
-            st.plotly_chart(fig_sus, use_container_width=True)
-        else:
-            st.info("Não há colunas de quantidade de leitos SUS/contratados/total disponíveis.")
+        cols_desc = [
+            "leitos_ano",
+            "leitos_mes",
+            "ibge_no_municipio",
+            "ibge_no_uf",
+            "leitos_tipo_especialidade_leito",
+            "leitos_tipo_leito",
+            "leitos_tipo_leito_nome",
+            "referencia_especialidade_no_leito",
+            "leitos_quantidade_total",
+            "leitos_quantidade_sus",
+            "leitos_quantidade_contratado",
+            "leitos_id_estabelecimento_cnes",
+            "estabelecimentos_nome_fantasia",
+            "estabelecimentos_tipo_novo_do_estabelecimento",
+            "estabelecimentos_subtipo_do_estabelecimento",
+            "estabelecimentos_gestao",
+            "estabelecimentos_status_do_estabelecimento",
+            "estabelecimentos_convenio_sus",
+            "estabelecimentos_categoria_natureza_juridica",
+            "onco_cacon",
+            "onco_unacon",
+            "onco_radioterapia",
+            "onco_quimioterapia",
+        ]
 
-    # ============================================================
-    # 📋 TABELA DESCRITIVA — Leitos (com limite de linhas)
-    # ============================================================
-    st.info("📋 Tabela descritiva dos leitos filtrados")
+        cols_ok = cols_desc  # assumindo schema coerente
 
-    cols_desc = [
-        "leitos_ano",
-        "leitos_mes",
-        "ibge_no_municipio",
-        "ibge_no_uf",
-        "leitos_tipo_especialidade_leito",
-        "leitos_tipo_leito",
-        "leitos_tipo_leito_nome",
-        "referencia_especialidade_no_leito",
-        "leitos_quantidade_total",
-        "leitos_quantidade_sus",
-        "leitos_quantidade_contratado",
-        "leitos_id_estabelecimento_cnes",
-        "estabelecimentos_nome_fantasia",
-        "estabelecimentos_tipo_novo_do_estabelecimento",
-        "estabelecimentos_subtipo_do_estabelecimento",
-        "estabelecimentos_gestao",
-        "estabelecimentos_status_do_estabelecimento",
-        "estabelecimentos_convenio_sus",
-        "estabelecimentos_categoria_natureza_juridica",
-        "onco_cacon",
-        "onco_unacon",
-        "onco_radioterapia",
-        "onco_quimioterapia",
-    ]
-
-    cols_ok = [c for c in cols_desc if c in dfl.columns]
-
-    if cols_ok:
         max_rows_display = 5000
-        n_total = dfl.shape[0]
+        n_total = total_reg
 
         if n_total > max_rows_display:
             st.warning(
                 f"A base filtrada possui {fmt_num(n_total)} linhas. "
                 f"Por desempenho, a tabela abaixo mostra apenas as primeiras {fmt_num(max_rows_display)} linhas. "
-                "Use o botão de download para obter o conjunto completo."
+                "O download também está limitado às mesmas linhas."
             )
         else:
             st.caption(f"A base filtrada possui {fmt_num(n_total)} linhas.")
 
-        df_display = dfl[cols_ok].head(max_rows_display)
-
-        st.dataframe(df_display, use_container_width=True, height=500)
-
-        csv = dfl[cols_ok].to_csv(index=False).encode("utf-8")
-        st.download_button(
-            "📥 Baixar CSV",
-            csv,
-            "leitos_filtrados.csv",
-            "text/csv",
+        df_display = query_lei_detalhe(
+            where_sql_lei,
+            bq_params_lei,
+            lei_table_id,
+            cols_ok,
+            limit_rows=max_rows_display,
         )
-    else:
-        st.info("Não existem colunas suficientes para montar a tabela de leitos.")
 
+        if df_display.empty:
+            st.warning(
+                "Não foi possível carregar a tabela detalhada de leitos com os filtros aplicados."
+            )
+        else:
+            st.dataframe(df_display, use_container_width=True, height=500)
+
+            csv = df_display.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                "📥 Baixar CSV (até 5.000 linhas)",
+                csv,
+                "leitos_filtrados.csv",
+                "text/csv",
+                use_container_width=True,
+            )
+            
 # =====================================================================
 # X) Cadastro Equipamentos
 # =====================================================================
