@@ -572,8 +572,8 @@ with st.sidebar:
 st.markdown(
     """
     <div style='background: linear-gradient(to right, #004e92, #000428); padding: 40px; border-radius: 12px; margin-bottom:30px'>
-        <h1 style='color: white;'>📊 Análise do Complexo Produtivo da Saúde Oncológica</h1>
-        <p style='color: white;'>Explore os dados do Complexo Produtivo Oncológico para tomada de decisões.</p>
+        <h1 style='color: white;'>📊 Análise do Complexo Assistencial da Atenção Oncológica</h1>
+        <p style='color: white;'>Explore os dados do Complexo Assistencial da Atenção Oncológica para tomada de decisões.</p>
     </div>
     """,
     unsafe_allow_html=True,
